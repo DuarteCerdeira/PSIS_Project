@@ -1,3 +1,7 @@
+// Server Socket
+#define SOCKET_PREFIX "./chase-socket"
+
+// Size of the game window
 #define WINDOW_SIZE 20
 
 typedef enum msg_type {con, discon, binf, bmov, fstat, hp0} msg_type;
