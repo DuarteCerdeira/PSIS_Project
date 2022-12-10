@@ -1,16 +1,28 @@
 // Server Socket
-#define SOCKET_PREFIX "./chase-socket"
+#define SOCKET_PREFIX "/tmp/chase-socket"
 
 // Size of the game window
 #define WINDOW_SIZE 20
 
-typedef enum msg_type {con, discon, binf, bmov, fstat, hp0} msg_type;
+// Message types
+typedef enum msg_type_t {con, discon, binf, bmov, fstat, hp0} msg_type_t;
 
+// Direction
 typedef enum direction_t {UP, DOWN, LEFT, RIGHT} direction_t;
 
-struct msg_info {
-    msg_type type;
+// Message data
+struct msg_data {
+    msg_type_t type;
     direction_t dir;
     int player_id;
     char ch;
 };
+
+// Player information
+typedef struct player_info_t {
+    int player_id;
+    int pos_x;
+    int pos_y;
+    int hp;
+    char ch;
+} player_info_t;
