@@ -54,3 +54,5 @@ dkms.conf
 # Personal ignores
 *.pdf
 *~
+.vscode
+aux-code
