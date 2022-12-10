@@ -5,7 +5,7 @@
 #define WINDOW_SIZE 20
 
 // Message types
-typedef enum msg_type_t {con, discon, binf, bmov, fstat, hp0} msg_type_t;
+typedef enum msg_type_t {CONN, DCONN, BINFO, BMOV, FSTATUS, HP0, RJCT} msg_type_t;
 
 // Direction
 typedef enum direction_t {UP, DOWN, LEFT, RIGHT} direction_t;
