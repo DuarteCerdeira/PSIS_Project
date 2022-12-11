@@ -20,15 +20,14 @@ player_info_t bots[10];
 int n_players;
 char active_chars[10];
 
-int handle_connection (struct sockaddr *client, struct msg_data msg)
+int handle_connection (struct sockaddr_un client)
 {
     if (n_players >= 10) {
 	return -1;
     }
 
     // extract the client pid from the address
-    char client_address[108];
-    strcpy(client_address, ((struct sockaddr_un *) client)->sun_path);
+    char *client_address = client.sun_path;
     char *client_address_pid = strrchr(client_address, '-') + 1;
 
     // select a random character to assign to the player
@@ -46,10 +45,8 @@ int handle_connection (struct sockaddr *client, struct msg_data msg)
     return 0;
 }
 
-void handle_disconnection (struct msg_data msg)
+void handle_disconnection (int id)
 {
-    int id = msg.player_id;
-
     int i;
     for(i = 0; i < n_players; i++) {
 	if (players[i].player_id == id) {
@@ -62,6 +59,69 @@ void handle_disconnection (struct msg_data msg)
     players[i].hp = 0;
     players[i].pos_x = 0;
     players[i].pos_y = 0;
+}
+
+int check_collision (int x, int y)
+{
+    int i;
+    for (i = 0; i < n_players; i++) {
+	if (players[i].pos_x == x && players[i].pos_y == y) {
+	    return i;
+	}
+    }
+
+    return -1;
+}
+
+int handle_move (int id, direction_t dir)
+{
+    int i;
+    for(i = 0; i < n_players; i++) {
+      if (players[i].player_id == id) {
+	break;
+      }
+    }
+
+    if (i == n_players) {
+	return -1;
+    }
+
+    if (players[i].hp == 0) {
+	return 0;
+    }
+
+    switch (dir) {
+    case UP:
+        if (players[i].pos_y > 1) {
+	    players[i].pos_y--;
+	}
+	break;
+    case DOWN:
+	if (players[i].pos_y < WINDOW_SIZE - 1) {
+	    players[i].pos_y++;
+	}
+	break;
+    case LEFT:
+	if (players[i].pos_x > 1) {
+	    players[i].pos_x--;
+	}
+	break;
+    case RIGHT:
+	if (players[i].pos_x < WINDOW_SIZE - 1) {
+	    players[i].pos_x++;
+	}
+	break;
+    default:
+	break;
+    }
+
+    int coll = check_collision(players[i].pos_x, players[i].pos_y);
+    if (coll != -1) {
+	players[i].hp == 10 ? : players[i].hp++;
+	players[coll].hp--;
+    }
+
+    return 1;
 }
 
 int main()
@@ -124,7 +184,7 @@ int main()
 
 	switch(msg.type) {
 	case(CONN):
-	    if (handle_connection((struct sockaddr *) &client_address, msg) == -1) {
+	    if (handle_connection(client_address) == -1) {
 		msg.type = RJCT;
 	    } else {
 		msg.type = BINFO;
@@ -133,13 +193,24 @@ int main()
 	    }
 	    break;
 	case(DCONN):
-	    handle_disconnection(msg);
+	    handle_disconnection(msg.player_id);
 	    n_players--;
 	    break;
-	case(BMOV):
-	    // TODO: handle movement
-	default:
+	case(BMOV): {
+	    int alive = handle_move(msg.player_id, msg.dir);
+	    if (alive == -1) {
+		continue;
+	    }
+	    if (alive) {
+		msg.type = FSTATUS;
+		break;
+	    }
+	    msg.type = HP0;
+	    n_players--;
 	    break;
+	}
+	default:
+	    continue;
 	}
 
 	sendto(server_socket, &msg, sizeof(msg), 0,
