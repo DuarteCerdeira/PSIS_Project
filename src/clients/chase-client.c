@@ -12,7 +12,7 @@
 #include <sys/un.h>
 
 /* Local libraries */
-#include "chase.h"
+#include "../chase.h"
 
 typedef struct player_t
 {
@@ -117,6 +117,7 @@ int main()
 	}
 
 	struct sockaddr_un recv_address;
+	socklen_t recv_address_len = sizeof(recv_address);
 	recv_address.sun_family = AF_UNIX;
 
 	while (1)
@@ -127,7 +128,7 @@ int main()
 						   sizeof(connect_msg),
 						   0,
 						   (struct sockaddr *)&recv_address,
-						   (size_t *)&recv_address);
+						   &recv_address_len);
 
 		// checking that the message is from the server
 		if (n_bytes == -1)
@@ -212,7 +213,7 @@ int main()
 							   sizeof(msg),
 							   0,
 							   (struct sockaddr *)&recv_address,
-							   (size_t *)&recv_address);
+							   &recv_address_len);
 
 			// checking that the message is from the server
 			if (n_bytes == -1)
@@ -227,7 +228,7 @@ int main()
 		}
 		if (msg.type == HP0)
 		{
-			printw(mesage_win, "You died.\n");
+			printw("You died.\n", mesage_win);
 			unlink(client_address.sun_path);
 			exit(0);
 		}

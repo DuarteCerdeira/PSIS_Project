@@ -12,7 +12,7 @@
 #include <sys/un.h>
 
 /* Local libraries */
-#include "chase.h"
+#include "../chase.h"
 
 /* Global variables */
 player_info_t players[10];
@@ -38,7 +38,7 @@ int handle_connection (struct sockaddr_un client)
 
     players[n_players].player_id = atoi(client_address_pid);
     players[n_players].ch = rand_char;
-    players[n_players].hp = 10;
+    players[n_players].hp = 5; // init HP was at 10 (wrong), changed it to 5 [Adr]
     players[n_players].pos_x = WINDOW_SIZE/2;
     players[n_players].pos_y = WINDOW_SIZE/2;
 
