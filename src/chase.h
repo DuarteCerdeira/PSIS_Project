@@ -39,6 +39,7 @@ struct msg_data
 	int player_id;
 	int hp;
 	char ch;
+	WINDOW *win;
 };
 
 // Player information

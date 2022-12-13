@@ -29,26 +29,6 @@ void new_player(player_t *player, struct msg_data msg)
 	player->c = msg.ch;
 }
 
-void draw_player(WINDOW *win, player_t *player, int draw)
-{
-	// draw = 1: draw player
-	// draw = 0: erase player
-	int ch;
-	if (draw)
-	{
-		ch = player->c;
-	}
-	else
-	{
-		ch = ' ';
-	}
-	int p_x = player->x;
-	int p_y = player->y;
-	wmove(win, p_y, p_x);
-	waddch(win, ch);
-	wrefresh(win);
-}
-
 direction_t move_player(player_t *player, int direction)
 {
 	if (player->y != 1 && direction == KEY_UP)
@@ -74,7 +54,7 @@ int main()
 	int client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (client_socket == -1)
 	{
-		perror("socket");
+		perror("socket: ");
 		exit(-1);
 	}
 
@@ -91,7 +71,7 @@ int main()
 				   sizeof(client_address));
 	if (err == -1)
 	{
-		perror("bind");
+		perror("bind: ");
 		exit(-1);
 	}
 
@@ -123,44 +103,6 @@ int main()
 	recv_address.sun_family = AF_UNIX;
 	memset(recv_address.sun_path, '\0', sizeof(recv_address.sun_path));
 
-	while (1)
-	{
-		// receive connect message
-		n_bytes = recvfrom(client_socket,
-						   &connect_msg,
-						   sizeof(connect_msg),
-						   0,
-						   (struct sockaddr *)&recv_address,
-						   &recv_address_len);
-
-		// checking that the message is from the server
-		if (n_bytes == -1)
-		{
-			perror("connect recvfrom: ");
-			exit(-1);
-		}
-		else if (strcmp(server_address.sun_path, recv_address.sun_path) != 0)
-		{
-			printf("Recieved message is not from server.\nIgnoring...\n");
-			continue;
-		}
-
-		// checking message type
-		if (connect_msg.type == RJCT)
-		{
-			printf("Server is full.\n");
-			exit(0);
-		}
-		else if (connect_msg.type == BINFO)
-		{
-			printf("Connected to server.\n");
-			break;
-		}
-	}
-
-	// create player
-	new_player(&player, connect_msg);
-
 	initscr();
 	cbreak();
 	noecho();
@@ -176,11 +118,50 @@ int main()
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
-	// draw player
-	draw_player(player_win, &player, true);
+	while (1)
+	{
+		memset(&connect_msg, 0, sizeof(connect_msg));
+		// receive connect message
+		n_bytes = recvfrom(client_socket,
+						   &connect_msg,
+						   sizeof(connect_msg),
+						   0,
+						   (struct sockaddr *)&recv_address,
+						   &recv_address_len);
+
+		// checking that the message is from the server
+		if (n_bytes == -1)
+		{
+			perror("connect recvfrom: ");
+			exit(-1);
+		}
+		else if (strcmp(server_address.sun_path, recv_address.sun_path) != 0)
+			continue;
+
+		// checking message type
+		if (connect_msg.type == RJCT)
+		{
+			werase(msg_win);
+			box(msg_win, 0, 0);
+			mvwprintw(msg_win, 1, 1, "Server is full\n");
+			wrefresh(msg_win);
+			exit(0);
+		}
+		else if (connect_msg.type == BINFO)
+		{
+			werase(msg_win);
+			box(msg_win, 0, 0);
+			mvwprintw(msg_win, 1, 1, "Connected to server\n");
+			wrefresh(msg_win);
+			break;
+		}
+	}
+
+	// create player
+	new_player(&player, connect_msg);
 
 	int key = -1;
-	struct msg_data msg = {0};
+	struct msg_data msg;
 
 	while (key != 27 && key != 'q')
 	{
@@ -188,6 +169,10 @@ int main()
 		msg = (struct msg_data){0}; // clear message
 		msg.type = BMOV;
 		msg.player_id = getpid();
+		werase(msg_win);
+		box(msg_win, 0, 0);
+		mvwprintw(msg_win, 1, 1, "Waiting for key\n");
+		wrefresh(msg_win);
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
@@ -204,6 +189,10 @@ int main()
 			perror("Ball move sendto: ");
 			exit(-1);
 		}
+		werase(msg_win);
+		box(msg_win, 0, 0);
+		mvwprintw(msg_win, 1, 1, "Sent move message\n");
+		wrefresh(msg_win);
 
 		// receive field status
 		while (1)
@@ -221,25 +210,36 @@ int main()
 				perror("Field status recvfrom: ");
 				exit(-1);
 			}
-			else if (recv_address.sun_path != server_address.sun_path)
+			else if (strcmp(recv_address.sun_path, server_address.sun_path) != 0)
 				continue;
-			else if (msg.type != FSTATUS || msg.type != HP0)
+			else if (msg.type != FSTATUS && msg.type != HP0)
 				continue;
 		}
+		werase(msg_win);
+		box(msg_win, 0, 0);
+		mvwprintw(msg_win, 1, 1, "Recieved field status\n");
+		wrefresh(msg_win);
+
 		if (msg.type == HP0)
 		{
-			wprintw(msg_win, "You died.\n");
+			werase(msg_win);
+			box(msg_win, 0, 0);
+			mvwprintw(msg_win, 1, 1, "You died\nExiting...\n");
 			wrefresh(msg_win);
+			sleep(5);
 			endwin();
+			close(client_socket);
 			unlink(client_address.sun_path);
 			exit(0);
 		}
 		else if (msg.type == FSTATUS)
 		{
 			player.hp = msg.hp;
-			break;
+			overwrite(msg.win, player_win);
 		}
 	}
 	endwin();
+	close(client_socket);
+	unlink(client_address.sun_path);
 	exit(0);
 }
