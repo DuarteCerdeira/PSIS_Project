@@ -21,12 +21,12 @@ typedef struct player_t
 	char c;
 } player_t;
 
-void new_player(player_t *player, char c)
+void new_player(player_t *player, struct msg_data msg)
 {
 	player->x = INIT_X;
 	player->y = INIT_Y;
-	player->hp = INIT_HP;
-	player->c = c;
+	player->hp = msg.hp;
+	player->c = msg.ch;
 }
 
 void draw_player(WINDOW *win, player_t *player, int draw)
@@ -49,21 +49,21 @@ void draw_player(WINDOW *win, player_t *player, int draw)
 	wrefresh(win);
 }
 
-void move_player(player_t *player, int direction)
+direction_t move_player(player_t *player, int direction)
 {
 	if (player->y != 1 && direction == KEY_UP)
-		player->y--;
+		return UP;
 
 	else if (player->y != WINDOW_SIZE - 2 && direction == KEY_DOWN)
-		player->y++;
+		return DOWN;
 
 	else if (player->x != 1 && direction == KEY_LEFT)
-		player->x--;
+		return LEFT;
 
 	else if (player->x != WINDOW_SIZE - 2 && direction == KEY_RIGHT)
-		player->x++;
+		return RIGHT;
 
-	return;
+	return -1;
 }
 
 player_t player;
@@ -81,6 +81,7 @@ int main()
 	// bind address
 	struct sockaddr_un client_address;
 	client_address.sun_family = AF_UNIX;
+	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
 	sprintf(client_address.sun_path, "%s-%d", SOCKET_PREFIX, getpid());
 
 	unlink(client_address.sun_path);
@@ -97,10 +98,11 @@ int main()
 	// server address
 	struct sockaddr_un server_address;
 	server_address.sun_family = AF_UNIX;
+	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path));
 	sprintf(server_address.sun_path, "%s-%s", SOCKET_PREFIX, "server");
 
 	// send connect message
-	struct msg_data connect_msg;
+	struct msg_data connect_msg = {0};
 	connect_msg.type = CONN;
 	connect_msg.player_id = getpid();
 
@@ -119,6 +121,7 @@ int main()
 	struct sockaddr_un recv_address;
 	socklen_t recv_address_len = sizeof(recv_address);
 	recv_address.sun_family = AF_UNIX;
+	memset(recv_address.sun_path, '\0', sizeof(recv_address.sun_path));
 
 	while (1)
 	{
@@ -136,7 +139,7 @@ int main()
 			perror("connect recvfrom: ");
 			exit(-1);
 		}
-		else if (recv_address.sun_path != server_address.sun_path)
+		else if (strcmp(server_address.sun_path, recv_address.sun_path) != 0)
 		{
 			printf("Recieved message is not from server.\nIgnoring...\n");
 			continue;
@@ -156,7 +159,7 @@ int main()
 	}
 
 	// create player
-	new_player(&player, connect_msg.player_id);
+	new_player(&player, connect_msg);
 
 	initscr();
 	cbreak();
@@ -169,29 +172,26 @@ int main()
 	keypad(player_win, TRUE);
 
 	// message window
-	WINDOW *mesage_win = newwin(5, WINDOW_SIZE, WINDOW_SIZE, 0);
-	box(mesage_win, 0, 0);
-	wrefresh(mesage_win);
+	WINDOW *msg_win = newwin(5, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	box(msg_win, 0, 0);
+	wrefresh(msg_win);
 
 	// draw player
 	draw_player(player_win, &player, true);
 
 	int key = -1;
-	struct msg_data msg;
+	struct msg_data msg = {0};
 
 	while (key != 27 && key != 'q')
 	{
 		// send move message
+		msg = (struct msg_data){0}; // clear message
 		msg.type = BMOV;
-		msg.player_id = player.c;
+		msg.player_id = getpid();
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
-		{
-			draw_player(player_win, &player, false);
-			move_player(&player, key);
-			draw_player(player_win, &player, true);
-		}
+			msg.dir = move_player(&player, key);
 
 		n_bytes = sendto(client_socket,
 						 &msg,
@@ -228,7 +228,9 @@ int main()
 		}
 		if (msg.type == HP0)
 		{
-			printw("You died.\n", mesage_win);
+			wprintw(msg_win, "You died.\n");
+			wrefresh(msg_win);
+			endwin();
 			unlink(client_address.sun_path);
 			exit(0);
 		}
@@ -238,6 +240,6 @@ int main()
 			break;
 		}
 	}
-
+	endwin();
 	exit(0);
 }

@@ -16,11 +16,11 @@ all: client server
 
 # Client executable
 client: chase-client.o $(HEADERS)
-	$(CC) ./bin/$< $(HEADERS) -o client$(EXT) $(LFLAGS)
+	$(CC) ./bin/$< $(HEADERS) -o chase-client$(EXT) $(LFLAGS)
 
 # Server executable
 server: chase-server.o $(HEADERS)
-	$(CC) ./bin/$< $(HEADERS) -o server$(EXT) $(LFLAGS)
+	$(CC) ./bin/$< $(HEADERS) -o chase-server$(EXT) $(LFLAGS)
 
 # Client object files
 chase-client.o:

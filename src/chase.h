@@ -43,7 +43,7 @@ struct msg_data
 // Player information
 typedef struct player_info_t
 {
-	int player_id;
+	int id;
 	int pos_x;
 	int pos_y;
 	int hp;
