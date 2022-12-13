@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <time.h>
 
 /* NCurses */
 #include <ncurses.h>
@@ -264,8 +265,9 @@ int main()
 	    continue;
 	}
 
+	
 	sendto(server_socket, &msg, sizeof(msg), 0,
-	       (struct sockaddr *) &client_address,
+	       (struct sockaddr *)&client_address,
 	       client_address_size);
 
 	wrefresh(msg_win);
