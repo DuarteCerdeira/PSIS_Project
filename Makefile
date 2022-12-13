@@ -1,10 +1,17 @@
-CC := gcc									# Compiler
-CFLAGS := -Wall -g							# Compiler flags
-LFLAGS := -lncurses							# Linker flags
-HEADERS := $(wildcard $(SRCPATH)/*.h)		# Header files
-CLIENT_PATH := ./src/clients/chase-client.c	# Client source code path
-SERVER_PATH := ./src/server/chase-server.c	# Server source code path
-EXT := .out									# Executable extension
+# Compiler
+CC := gcc
+# Compiler flags
+CFLAGS := -Wall -g
+# Linker flags
+LFLAGS := -lncurses
+# Header files
+HEADERS := $(wildcard $(SRCPATH)/*.h)
+# Client source code path
+CLIENT_PATH := ./src/clients/chase-client.c
+# Server source code path
+SERVER_PATH := ./src/server/chase-server.c
+# Executable extension
+EXT := .out
 
 # NOTES: 
 # - $< is the first dependency
