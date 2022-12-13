@@ -16,19 +16,19 @@ all: client server
 
 # Client executable
 client: chase-client.o $(HEADERS)
-	$(CC) ./bin/$< $(HEADERS) -o client$(EXT) $(LFLAGS)
+	$(CC) ./obj/$< $(HEADERS) -o ./bin/client$(EXT) $(LFLAGS)
 
 # Server executable
 server: chase-server.o $(HEADERS)
-	$(CC) ./bin/$< $(HEADERS) -o server$(EXT) $(LFLAGS)
+	$(CC) ./obj/$< $(HEADERS) -o ./bin/server$(EXT) $(LFLAGS)
 
 # Client object files
 chase-client.o:
-	$(CC) $(CFLAGS) -c $(CLIENT_PATH) -o ./bin/chase-client.o
+	$(CC) $(CFLAGS) -c $(CLIENT_PATH) -o ./obj/chase-client.o
 
 # Server object files
 chase-server.o:
-	$(CC) $(CFLAGS) -c $(SERVER_PATH) -o ./bin/chase-server.o
+	$(CC) $(CFLAGS) -c $(SERVER_PATH) -o ./obj/chase-server.o
 
 # Zip
 zip: ./src/$* ./Makefile ./bin
@@ -36,5 +36,5 @@ zip: ./src/$* ./Makefile ./bin
 
 # Clean
 clean:
-	rm ./bin/*.o
-	rm *.out
+	rm ./bin/*.out
+	rm ./obj/*.o

@@ -6,7 +6,8 @@
 #define INIT_X WINDOW_SIZE / 2 // Initial x position
 #define INIT_Y WINDOW_SIZE / 2 // Initial y position
 #define INIT_HP 5			   // Initial HP
-#define MAX_HP 10			   // Maximum HP
+#define MAX_HP 10                          // Maximum HP
+#define MAX_PLAYERS 10			   // Maximum number of players
 
 // Message types
 typedef enum msg_type_t
@@ -43,7 +44,6 @@ struct msg_data
 // Player information
 typedef struct player_info_t
 {
-	int player_id;
 	int pos_x;
 	int pos_y;
 	int hp;

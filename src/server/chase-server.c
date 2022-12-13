@@ -1,4 +1,5 @@
 /* Standard libraries */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,16 +15,88 @@
 /* Local libraries */
 #include "../chase.h"
 
-/* Global variables */
-player_info_t players[10];
-player_info_t bots[10];
-int n_players;
-char active_chars[10];
+/* Client information structure */
+struct client_info {
+    int id;
+    player_info_t info;
+};
 
-int handle_connection (struct sockaddr_un client)
+/* Global variables */
+static struct client_info players[10];
+// static player_info_t bots[10];
+static int active_players;
+static char active_chars[10];
+
+void draw (WINDOW *win, player_info_t player, bool delete)
 {
-    if (n_players >= 10) {
-	return -1;
+    if (delete) {
+	mvwaddch(win, player.pos_y, player.pos_x, ' ');
+    } else {
+	mvwaddch(win, player.pos_y, player.pos_x, player.ch);
+    }
+}
+
+void move_player (WINDOW *win, player_info_t *player, direction_t dir)
+{
+    draw(win, *player, true);
+    
+    int new_x = player->pos_x;
+    int new_y = player->pos_y;
+    
+    switch (dir) {
+    case UP:
+	if (player->pos_y > 0) {
+	    new_y--;
+	}
+	break;
+    case DOWN:
+	if (player->pos_y < WINDOW_SIZE - 1) {
+	    new_y++;
+	}
+	break;
+    case LEFT:
+	if (player->pos_x > 0) {
+	    new_x--;
+	}
+	break;
+    case RIGHT:
+	if (player->pos_x < WINDOW_SIZE - 1) {
+	    new_x++;
+	}
+	break;
+    default:
+	break;
+    }
+    
+    player->pos_x = new_x;
+    player->pos_y = new_y;
+    draw(win, *player, false);
+}
+
+struct client_info *check_collision (int x, int y)
+{
+    int i;
+    while (i < MAX_PLAYERS || (players[i].info.pos_x != x && players[i].info.pos_y != y)) {
+	i++;
+    }
+
+    return i == MAX_PLAYERS ? NULL : &players[i];
+}
+
+struct client_info *select_player (int id)
+{
+    int i;
+    while (i < MAX_PLAYERS || players[i].id != id) {
+	i++;
+    }
+
+    return i == MAX_PLAYERS ? NULL : &players[i];
+}
+
+struct client_info *handle_connection (WINDOW *win, struct sockaddr_un client)
+{
+    if (active_players >= 10) {
+	return NULL;
     }
 
     // extract the client pid from the address
@@ -36,92 +109,53 @@ int handle_connection (struct sockaddr_un client)
 	 rand_char = rand()%('Z'-'A') + 'A';
     } while (strchr(active_chars, rand_char) != NULL);
 
-    players[n_players].player_id = atoi(client_address_pid);
-    players[n_players].ch = rand_char;
-    players[n_players].hp = 5; // init HP was at 10 (wrong), changed it to 5 [Adr]
-    players[n_players].pos_x = WINDOW_SIZE/2;
-    players[n_players].pos_y = WINDOW_SIZE/2;
+    int free_spot = 0;
+    while (players[free_spot].id != -1) {
+	free_spot++;
+    }
 
-    return 0;
+    players[free_spot].id = atoi(client_address_pid);
+    players[free_spot].info.ch = rand_char;
+    players[free_spot].info.hp = INIT_HP;
+    players[free_spot].info.pos_x = INIT_X;
+    players[free_spot].info.pos_y = INIT_Y;
+
+    return &players[free_spot];
 }
 
-void handle_disconnection (int id)
+void handle_disconnection (WINDOW *win, struct client_info *player)
 {
-    int i;
-    for(i = 0; i < n_players; i++) {
-	if (players[i].player_id == id) {
-	    break;
-	}
-    }
-
-    players[i].player_id = 0;
-    players[i].ch = '\0';
-    players[i].hp = 0;
-    players[i].pos_x = 0;
-    players[i].pos_y = 0;
+    player->id = -1;
 }
 
-int check_collision (int x, int y)
+void handle_move (WINDOW *win, struct client_info *player, direction_t dir)
 {
-    int i;
-    for (i = 0; i < n_players; i++) {
-	if (players[i].pos_x == x && players[i].pos_y == y) {
-	    return i;
-	}
-    }
-
-    return -1;
-}
-
-int handle_move (int id, direction_t dir)
-{
-    int i;
-    for(i = 0; i < n_players; i++) {
-      if (players[i].player_id == id) {
-	break;
-      }
-    }
-
-    if (i == n_players) {
-	return -1;
-    }
-
-    if (players[i].hp == 0) {
-	return 0;
-    }
-
+    struct client_info *player_hit;
+    
     switch (dir) {
     case UP:
-        if (players[i].pos_y > 1) {
-	    players[i].pos_y--;
-	}
+	player_hit = check_collision(player->info.pos_x, player->info.pos_y - 1);
 	break;
     case DOWN:
-	if (players[i].pos_y < WINDOW_SIZE - 1) {
-	    players[i].pos_y++;
-	}
+	player_hit = check_collision(player->info.pos_x, player->info.pos_y + 1);
 	break;
     case LEFT:
-	if (players[i].pos_x > 1) {
-	    players[i].pos_x--;
-	}
+	player_hit = check_collision(player->info.pos_x - 1, player->info.pos_y);
 	break;
     case RIGHT:
-	if (players[i].pos_x < WINDOW_SIZE - 1) {
-	    players[i].pos_x++;
-	}
+	player_hit = check_collision(player->info.pos_x + 1, player->info.pos_y);
 	break;
     default:
 	break;
     }
 
-    int coll = check_collision(players[i].pos_x, players[i].pos_y);
-    if (coll != -1) {
-	players[i].hp == 10 ? : players[i].hp++;
-	players[coll].hp--;
+    if (player_hit) {
+	player->info.hp == MAX_HP ? MAX_HP : player->info.hp++;
+	player_hit->info.hp == 0 ? 0 : player_hit->info.hp--;
+	dir = NONE;
     }
-
-    return 1;
+    
+    move_player(win, &player->info, dir);
 }
 
 int main()
@@ -165,7 +199,7 @@ int main()
 
     // store client information
     struct sockaddr_un client_address;
-    socklen_t client_address_size;
+    socklen_t client_address_size = sizeof(client_address);
 
     while (1) {
 	// wait for messages from clients
@@ -179,34 +213,51 @@ int main()
 	    exit(-1);
 	}
 	if (nbytes == 0) {
-	    msg.type = DCONN;
+	    int player_id = atoi(strrchr(client_address.sun_path, '-') + 1);
+	    struct client_info *player = select_player(player_id);
+	    handle_disconnection(game_win, player);
+	    continue;
 	}
 
 	switch(msg.type) {
-	case(CONN):
-	    if (handle_connection(client_address) == -1) {
+	case(CONN): {
+	    struct client_info *player = handle_connection(game_win, client_address);
+	    if (player == NULL) {
+		// player limit reached: reject connection
 		msg.type = RJCT;
 	    } else {
 		msg.type = BINFO;
-		msg.ch = players[n_players].ch;
-		msg.player_id = players[n_players].player_id;
+		msg.player_id = player->id;
+		msg.ch = player->info.ch;
 	    }
 	    break;
-	case(DCONN):
-	    handle_disconnection(msg.player_id);
-	    n_players--;
-	    break;
-	case(BMOV): {
-	    int alive = handle_move(msg.player_id, msg.dir);
-	    if (alive == -1) {
+	}
+	case(DCONN): {
+	    struct client_info *player = select_player(msg.player_id);
+	    if (player == NULL) {
+		// player not found: do nothing
 		continue;
 	    }
-	    if (alive) {
-		msg.type = FSTATUS;
-		break;
+	    
+	    handle_disconnection(game_win, player);
+	    active_players--;
+	    break;
+	}
+	case(BMOV): {
+	    struct client_info *player = select_player(msg.player_id);
+	    if (player == NULL) {
+		// player not found: do nothing
+		continue;
 	    }
-	    msg.type = HP0;
-	    n_players--;
+	    if (player->info.hp == 0) {
+		// player hp is 0: disconnect player
+		handle_disconnection(game_win, player);
+		msg.type = HP0;
+		active_players--;
+	    } else {
+		handle_move(game_win, player, msg.dir);
+		msg.type = FSTATUS;
+            }
 	    break;
 	}
 	default:
