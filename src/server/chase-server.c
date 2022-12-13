@@ -45,7 +45,7 @@ int handle_connection(struct sockaddr_un client)
 	players[n_players].hp = 5; // init HP was at 10 (wrong), changed it to 5 [Adr]
 	players[n_players].pos_x = WINDOW_SIZE / 2;
 	players[n_players].pos_y = WINDOW_SIZE / 2;
-	n_players++;
+	n_players++; // n_players was not incremented [Adr]
 	return 0;
 }
 
@@ -60,6 +60,7 @@ void handle_disconnection(int id)
 		}
 	}
 
+	// consider switching to memset() [Adr]
 	players[i].id = 0;
 	players[i].ch = '\0';
 	players[i].hp = 0;
@@ -69,6 +70,7 @@ void handle_disconnection(int id)
 
 int check_collision(int id, int x, int y)
 {
+	// had to pass ID to the function to avoid collision with the player itself [Adr]
 	int i;
 	for (i = 0; i < n_players; i++)
 	{
@@ -135,7 +137,7 @@ int handle_move(int id, direction_t dir)
 	int coll = check_collision(players[i].id, players[i].pos_x, players[i].pos_y);
 	if (coll != -1)
 	{
-		players[i].hp == 10 ? players[i].hp : players[i].hp++;
+		players[i].hp == 10 ? players[i].hp : players[i].hp++; 
 		players[coll].hp--;
 	}
 
@@ -155,7 +157,7 @@ int main()
 	// bind address
 	struct sockaddr_un server_address;
 	server_address.sun_family = AF_UNIX;
-	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path));
+	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path)); // initialize the path to 0
 	sprintf(server_address.sun_path, "%s-%s", SOCKET_PREFIX, "server");
 
 	unlink(server_address.sun_path);
@@ -180,14 +182,14 @@ int main()
 	wrefresh(game_win);
 
 	// create the message window
-	WINDOW *msg_win = newwin(10, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(10, WINDOW_SIZE, 0, WINDOW_SIZE + 2); // changed the msg_win to the side [Adr]
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
 	// store client information
 	struct sockaddr_un client_address;
 	socklen_t client_address_size = sizeof(client_address);
-	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
+	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path)); // initialize the path to 0
 
 	while (1)
 	{
@@ -199,7 +201,7 @@ int main()
 
 		if (nbytes == -1)
 		{
-			perror("recvfrom");
+			perror("recvfrom: ");
 			exit(-1);
 		}
 		if (nbytes == 0)
@@ -221,6 +223,7 @@ int main()
 				msg.ch = players[n_players - 1].ch;
 				msg.player_id = players[n_players - 1].id;
 				msg.hp = players[n_players - 1].hp;
+				// if there is 1 player, we need to look at the 0th index
 			}
 			break;
 		case (DCONN):
