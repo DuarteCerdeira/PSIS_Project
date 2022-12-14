@@ -109,7 +109,7 @@ struct client_info *select_player(int id)
 			break;
 	}
 
-	return i == MAX_PLAYERS - 1 ? NULL : &players[i];
+	return i == MAX_PLAYERS ? NULL : &players[i];
 }
 
 struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
@@ -144,7 +144,9 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	players[free_spot].info.pos_x = INIT_X;
 	players[free_spot].info.pos_y = INIT_Y;
 
-	draw(win, players[free_spot].info, false);
+	active_chars[free_spot] = rand_char;
+
+	move_player(win, &players[free_spot].info, NONE);
 
 	return &players[free_spot];
 }
@@ -188,8 +190,10 @@ void field_status(player_info_t *field)
 
 void handle_disconnection(WINDOW *win, struct client_info *player)
 {
-	player->id = 0;
-	return;
+	draw(win, player->info, true);
+	memset(player, 0, sizeof(struct client_info));
+
+	*strrchr(active_chars, player->info.ch) = '\0';
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -276,10 +280,10 @@ int main()
 	{
 		// just printing msgs
 		// erase makes it cleaner, had to draw box again [A]
-		werase(msg_win);
-		box(msg_win, 0, 0);
-		mvwprintw(msg_win, 1, 1, "Waiting for msg\n");
-		wrefresh(msg_win);
+		/* werase(msg_win); */
+		/* box(msg_win, 0, 0); */
+		/* mvwprintw(msg_win, 1, 1, "Waiting for msg\n"); */
+		/* wrefresh(msg_win); */
 
 		// wait for messages from clients
 		struct msg_data msg = {0};
@@ -374,6 +378,7 @@ int main()
 
 		memset(&msg, 0, sizeof(msg));
 
+		wrefresh(msg_win);
 		wrefresh(game_win);
 	}
 	endwin();
