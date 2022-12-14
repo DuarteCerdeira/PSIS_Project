@@ -48,6 +48,8 @@ direction_t move_player(player_t *player, int direction)
 
 void draw_field(WINDOW *win, player_info_t *players)
 {
+	werase(win);
+	box(win, 0, 0);
 	for (int i = 0; i < MAX_PLAYERS && players[i].ch != 0; i++)
 	{
 		// draw player
