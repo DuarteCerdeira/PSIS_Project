@@ -21,12 +21,13 @@ typedef struct player_t
 	char c;
 } player_t;
 
-void new_player(player_t *player, struct msg_data msg)
+void new_player(player_t *player, player_info_t p_stats)
 {
-	player->x = INIT_X;
-	player->y = INIT_Y;
-	player->hp = msg.hp;
-	player->c = msg.ch;
+	player->x = p_stats.pos_x;
+	player->y = p_stats.pos_y;
+	player->hp = p_stats.hp;
+	player->c = p_stats.ch;
+	return;
 }
 
 direction_t move_player(player_t *player, int direction)
@@ -48,6 +49,8 @@ direction_t move_player(player_t *player, int direction)
 
 void draw_field(WINDOW *win, player_info_t *players)
 {
+	werase(win);
+	box(win, 0, 0);
 	for (int i = 0; i < MAX_PLAYERS && players[i].ch != 0; i++)
 	{
 		// draw player
@@ -57,6 +60,7 @@ void draw_field(WINDOW *win, player_info_t *players)
 	return;
 }
 player_t player;
+int client_id;
 
 void write_string(WINDOW *win, char *str)
 {
@@ -68,6 +72,7 @@ void write_string(WINDOW *win, char *str)
 
 int main()
 {
+	client_id = getpid();
 	// open socket
 	int client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (client_socket == -1)
@@ -80,7 +85,7 @@ int main()
 	struct sockaddr_un client_address;
 	client_address.sun_family = AF_UNIX;
 	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
-	sprintf(client_address.sun_path, "%s-%d", SOCKET_PREFIX, getpid());
+	sprintf(client_address.sun_path, "%s-%d", SOCKET_PREFIX, client_id);
 
 	unlink(client_address.sun_path);
 
@@ -102,7 +107,7 @@ int main()
 	// send connect message
 	struct msg_data connect_msg = {0};
 	connect_msg.type = CONN;
-	connect_msg.player_id = getpid();
+	connect_msg.player_id = client_id;
 
 	int n_bytes = sendto(client_socket,
 						 &connect_msg,
@@ -170,7 +175,7 @@ int main()
 	}
 
 	// create player
-	new_player(&player, connect_msg);
+	new_player(&player, connect_msg.field[0]);
 
 	int key = -1;
 	struct msg_data msg;
@@ -180,13 +185,16 @@ int main()
 		// send move message
 		msg = (struct msg_data){0}; // clear message
 		msg.type = BMOV;
-		msg.player_id = getpid();
+		msg.player_id = client_id;
 		write_string(msg_win, "Waiting for key\n");
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
 			msg.dir = move_player(&player, key);
-
+		else if (key == 27 || key == 'q')
+			break;
+		else
+			continue;
 		n_bytes = sendto(client_socket,
 						 &msg,
 						 sizeof(msg),
@@ -237,6 +245,23 @@ int main()
 			draw_field(player_win, msg.field);
 		}
 	}
+	msg = (struct msg_data){0};
+	msg.type = DCONN;
+	msg.player_id = client_id;
+	n_bytes = sendto(client_socket,
+					 &msg,
+					 sizeof(msg),
+					 0,
+					 (struct sockaddr *)&server_address,
+					 sizeof(server_address));
+	if (n_bytes == -1)
+	{
+		perror("Disconnect sendto: ");
+		exit(-1);
+	}
+	write_string(msg_win, "Disconnected\nExiting...\n");
+	sleep(5);
+
 	endwin();
 	close(client_socket);
 	unlink(client_address.sun_path);

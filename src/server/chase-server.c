@@ -39,6 +39,7 @@ void draw(WINDOW *win, player_info_t player, bool delete)
 	{
 		mvwaddch(win, player.pos_y, player.pos_x, player.ch);
 	}
+	return;
 }
 
 void move_player(WINDOW *win, player_info_t *player, direction_t dir)
@@ -51,25 +52,25 @@ void move_player(WINDOW *win, player_info_t *player, direction_t dir)
 	switch (dir)
 	{
 	case UP:
-		if (player->pos_y > 0)
+		if (player->pos_y > 1)
 		{
 			new_y--;
 		}
 		break;
 	case DOWN:
-		if (player->pos_y < WINDOW_SIZE - 1)
+		if (player->pos_y < WINDOW_SIZE - 2)
 		{
 			new_y++;
 		}
 		break;
 	case LEFT:
-		if (player->pos_x > 0)
+		if (player->pos_x > 1)
 		{
 			new_x--;
 		}
 		break;
 	case RIGHT:
-		if (player->pos_x < WINDOW_SIZE - 1)
+		if (player->pos_x < WINDOW_SIZE - 2)
 		{
 			new_x++;
 		}
@@ -83,19 +84,19 @@ void move_player(WINDOW *win, player_info_t *player, direction_t dir)
 	draw(win, *player, false);
 }
 
-struct client_info *check_collision(int x, int y)
+struct client_info *check_collision(int x, int y, int id)
 {
 	// had to change structure bcs segfault [A]
 	int i = 0;
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
-		if (players[i].info.pos_x == x && players[i].info.pos_y == y)
+		if (players[i].info.pos_x == x && players[i].info.pos_y == y && players[i].id != id)
 		{
 			break;
 		}
 	}
 
-	return i == MAX_PLAYERS - 1 ? NULL : &players[i];
+	return i == MAX_PLAYERS ? NULL : &players[i];
 }
 
 struct client_info *select_player(int id)
@@ -142,6 +143,8 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	players[free_spot].info.hp = INIT_HP;
 	players[free_spot].info.pos_x = INIT_X;
 	players[free_spot].info.pos_y = INIT_Y;
+
+	draw(win, players[free_spot].info, false);
 
 	return &players[free_spot];
 }
@@ -196,16 +199,16 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 	switch (dir)
 	{
 	case UP:
-		player_hit = check_collision(player->info.pos_x, player->info.pos_y - 1);
+		player_hit = check_collision(player->info.pos_x, player->info.pos_y - 1, player->id);
 		break;
 	case DOWN:
-		player_hit = check_collision(player->info.pos_x, player->info.pos_y + 1);
+		player_hit = check_collision(player->info.pos_x, player->info.pos_y + 1, player->id);
 		break;
 	case LEFT:
-		player_hit = check_collision(player->info.pos_x - 1, player->info.pos_y);
+		player_hit = check_collision(player->info.pos_x - 1, player->info.pos_y, player->id);
 		break;
 	case RIGHT:
-		player_hit = check_collision(player->info.pos_x + 1, player->info.pos_y);
+		player_hit = check_collision(player->info.pos_x + 1, player->info.pos_y, player->id);
 		break;
 	default:
 		break;
@@ -290,11 +293,6 @@ int main()
 		}
 		if (nbytes == 0)
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Client disconnected\n");
-			wrefresh(msg_win);
-
 			int player_id = atoi(strrchr(client_address.sun_path, '-') + 1);
 			struct client_info *player = select_player(player_id);
 			handle_disconnection(game_win, player);
@@ -305,10 +303,6 @@ int main()
 		{
 		case (CONN):
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Handling connection request\n");
-			wrefresh(msg_win);
 			struct client_info *player = handle_connection(game_win, client_address);
 			if (player == NULL)
 			{
@@ -320,12 +314,11 @@ int main()
 				// HP and whatnot probably not needed [A]
 				msg.type = BINFO;
 				msg.player_id = player->id;
-				msg.ch = player->info.ch;
-				msg.hp = 5;
-				werase(msg_win);
-				box(msg_win, 0, 0);
-				mvwprintw(msg_win, 1, 1, "Sending player info to client\n");
-				wrefresh(msg_win);
+				msg.field[0].ch = player->info.ch;
+				msg.field[0].pos_x = player->info.pos_x;
+				msg.field[0].pos_y = player->info.pos_y;
+				msg.field[0].hp = player->info.hp;
+				msg.dir = NONE;
 			}
 			break;
 		}
@@ -340,10 +333,7 @@ int main()
 
 			handle_disconnection(game_win, player);
 			active_players--;
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Player disconnected\n");
-			wrefresh(msg_win);
+
 			break;
 		}
 		case (BMOV):
@@ -384,7 +374,7 @@ int main()
 
 		memset(&msg, 0, sizeof(msg));
 
-		wrefresh(msg_win);
+		wrefresh(game_win);
 	}
 	endwin();
 	exit(0);
