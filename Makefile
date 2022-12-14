@@ -30,11 +30,11 @@ server: chase-server.o $(HEADERS)
 	$(CC) ./obj/$< $(HEADERS) -o ./bin/chase-server$(EXT) $(LFLAGS)
 
 # Client object files
-chase-client.o:
+chase-client.o: $(CLIENT_PATH)
 	$(CC) $(CFLAGS) -c $(CLIENT_PATH) -o ./obj/chase-client.o
 
 # Server object files
-chase-server.o:
+chase-server.o: $(SERVER_PATH)
 	$(CC) $(CFLAGS) -c $(SERVER_PATH) -o ./obj/chase-server.o
 
 # Zip

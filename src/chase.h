@@ -6,8 +6,8 @@
 #define INIT_X WINDOW_SIZE / 2 // Initial x position
 #define INIT_Y WINDOW_SIZE / 2 // Initial y position
 #define INIT_HP 5			   // Initial HP
-#define MAX_HP 10                          // Maximum HP
-#define MAX_PLAYERS 10			   // Maximum number of players
+#define MAX_HP 10			   // Maximum HP
+#define MAX_PLAYERS 10		   // Maximum number of players
 
 // Message types
 typedef enum msg_type_t
@@ -31,17 +31,6 @@ typedef enum direction_t
 	RIGHT
 } direction_t;
 
-// Message data
-struct msg_data
-{
-	msg_type_t type;
-	direction_t dir;
-	int player_id;
-	int hp;
-	char ch;
-	WINDOW *win;
-};
-
 // Player information
 typedef struct player_info_t
 {
@@ -50,3 +39,14 @@ typedef struct player_info_t
 	int hp;
 	char ch;
 } player_info_t;
+
+// Message data
+struct msg_data
+{
+	int player_id;
+	msg_type_t type;
+	direction_t dir;
+	int hp;
+	char ch;
+	player_info_t field[MAX_PLAYERS * 3]; // max size -> 10 players + 10 bots + 10 prizes
+};

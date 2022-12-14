@@ -46,7 +46,25 @@ direction_t move_player(player_t *player, int direction)
 	return -1;
 }
 
+void draw_field(WINDOW *win, player_info_t *players)
+{
+	for (int i = 0; i < MAX_PLAYERS && players[i].ch != 0; i++)
+	{
+		// draw player
+		mvwaddch(win, players[i].pos_y, players[i].pos_x, players[i].ch);
+	}
+	wrefresh(win);
+	return;
+}
 player_t player;
+
+void write_string(WINDOW *win, char *str)
+{
+	werase(win);
+	box(win, 0, 0);
+	mvwprintw(win, 1, 1, "%s", str);
+	wrefresh(win);
+}
 
 int main()
 {
@@ -141,18 +159,12 @@ int main()
 		// checking message type
 		if (connect_msg.type == RJCT)
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Server is full\n");
-			wrefresh(msg_win);
+
 			exit(0);
 		}
 		else if (connect_msg.type == BINFO)
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Connected to server\n");
-			wrefresh(msg_win);
+			write_string(msg_win, "Connected to server\n");
 			break;
 		}
 	}
@@ -169,10 +181,7 @@ int main()
 		msg = (struct msg_data){0}; // clear message
 		msg.type = BMOV;
 		msg.player_id = getpid();
-		werase(msg_win);
-		box(msg_win, 0, 0);
-		mvwprintw(msg_win, 1, 1, "Waiting for key\n");
-		wrefresh(msg_win);
+		write_string(msg_win, "Waiting for key\n");
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
@@ -189,10 +198,7 @@ int main()
 			perror("Ball move sendto: ");
 			exit(-1);
 		}
-		werase(msg_win);
-		box(msg_win, 0, 0);
-		mvwprintw(msg_win, 1, 1, "Sent move message\n");
-		wrefresh(msg_win);
+		write_string(msg_win, "Sent move msg\n");
 
 		// receive field status
 		while (1)
@@ -212,20 +218,14 @@ int main()
 			}
 			else if (strcmp(recv_address.sun_path, server_address.sun_path) != 0)
 				continue;
-			else if (msg.type != FSTATUS && msg.type != HP0)
-				continue;
+			else if (msg.type == FSTATUS || msg.type == HP0)
+				break;
 		}
-		werase(msg_win);
-		box(msg_win, 0, 0);
-		mvwprintw(msg_win, 1, 1, "Recieved field status\n");
-		wrefresh(msg_win);
+		write_string(msg_win, "Received field status\n");
 
 		if (msg.type == HP0)
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "You died\nExiting...\n");
-			wrefresh(msg_win);
+			write_string(msg_win, "You died\nExiting...\n");
 			sleep(5);
 			endwin();
 			close(client_socket);
@@ -234,8 +234,7 @@ int main()
 		}
 		else if (msg.type == FSTATUS)
 		{
-			player.hp = msg.hp;
-			overwrite(msg.win, player_win);
+			draw_field(player_win, msg.field);
 		}
 	}
 	endwin();

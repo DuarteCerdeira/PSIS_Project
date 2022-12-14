@@ -146,9 +146,47 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	return &players[free_spot];
 }
 
+void field_status(player_info_t *field)
+{
+	int i;
+	for (i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (players[i].id != 0)
+		{
+			field[i].ch = players[i].info.ch;
+			field[i].hp = players[i].info.hp;
+			field[i].pos_x = players[i].info.pos_x;
+			field[i].pos_y = players[i].info.pos_y;
+		}
+	}
+	// for (i; i < MAX_PLAYERS + i; i++)
+	// {
+	// 	if (bots[i].id == 0)
+	// 	{
+	// 		field[i].ch = bots[i].info.ch;
+	// 		field[i].hp = bots[i].info.hp;
+	// 		field[i].pos_x = bots[i].info.pos_x;
+	// 		field[i].pos_y = bots[i].info.pos_y;
+	// 	}
+	// }
+
+	// for (i; i < MAX_PLAYERS + i; i++)
+	// {
+	// 	if (prizes[i] != NULL)
+	// 	{
+	// 		field[i].ch = itoa(prizes[i].value);
+	// 		field[i].hp = -1;
+	// 		field[i].pos_x = prizes[i].pos_x;
+	// 		field[i].pos_y = prizes[i].pos_y;
+	// 	}
+	// }
+	return;
+}
+
 void handle_disconnection(WINDOW *win, struct client_info *player)
 {
 	player->id = 0;
+	return;
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -328,7 +366,7 @@ int main()
 				handle_move(game_win, player, msg.dir);
 
 				msg.type = FSTATUS;
-				msg.win = game_win;
+				field_status(msg.field);
 				msg.player_id = player->id;
 				werase(msg_win);
 				box(msg_win, 0, 0);
