@@ -5,7 +5,7 @@ CFLAGS := -Wall -g
 # Linker flags
 LFLAGS := -lncurses
 # Header files
-HEADERS := $(wildcard $(SRCPATH)/*.h)
+HEADERS := $(wildcard ./lib/*.h)
 # Client source code path
 CLIENT_PATH := ./src/clients/chase-client.c
 # Server source code path

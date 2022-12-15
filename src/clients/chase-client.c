@@ -16,47 +16,56 @@
 
 typedef struct player_t
 {
-	int x, y;
+	int pos_x, pos_y;
 	int hp;
-	char c;
+	char ch;
 } player_t;
 
 void new_player(player_t *player, player_info_t p_stats)
 {
-	player->x = p_stats.pos_x;
-	player->y = p_stats.pos_y;
+	player->pos_x = p_stats.pos_x;
+	player->pos_y = p_stats.pos_y;
 	player->hp = p_stats.hp;
-	player->c = p_stats.ch;
+	player->ch = p_stats.ch;
 	return;
 }
 
-direction_t move_player(player_t *player, int direction)
+direction_t get_direction(player_t *player, int direction)
 {
-	if (player->y != 1 && direction == KEY_UP)
+	switch (direction)
+	{
+	case KEY_UP:
 		return UP;
-
-	else if (player->y != WINDOW_SIZE - 2 && direction == KEY_DOWN)
+		break;
+	case KEY_DOWN:
 		return DOWN;
-
-	else if (player->x != 1 && direction == KEY_LEFT)
+		break;
+	case KEY_LEFT:
 		return LEFT;
-
-	else if (player->x != WINDOW_SIZE - 2 && direction == KEY_RIGHT)
+		break;
+	case KEY_RIGHT:
 		return RIGHT;
-
-	return -1;
+		break;
+	default:
+		return NONE;
+	}
 }
 
-void draw_field(WINDOW *win, player_info_t *players)
+void draw_field(WINDOW *game_win, WINDOW *msg_win, player_info_t *players)
 {
-	werase(win);
-	box(win, 0, 0);
+	werase(game_win);
+	werase(msg_win);
+	box(game_win, 0, 0);
+	box(msg_win, 0, 0);
 	for (int i = 0; i < MAX_PLAYERS && players[i].ch != 0; i++)
 	{
 		// draw player
-		mvwaddch(win, players[i].pos_y, players[i].pos_x, players[i].ch);
+		mvwaddch(game_win, players[i].pos_y, players[i].pos_x, players[i].ch);
+		mvwprintw(msg_win, i + 1, 1, "%c %d", players[i].ch, players[i].hp);
 	}
-	wrefresh(win);
+
+	wrefresh(msg_win);
+	wrefresh(game_win);
 	return;
 }
 player_t player;
@@ -70,8 +79,16 @@ void write_string(WINDOW *win, char *str)
 	wrefresh(win);
 }
 
-int main()
+int main(int argc, char *argv[])
 {
+	// get server address
+	if (argc != 2)
+	{
+		printf("Usage: %s <server_address>", argv[0]);
+		exit(-1);
+	}
+
+
 	client_id = getpid();
 	// open socket
 	int client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -102,7 +119,7 @@ int main()
 	struct sockaddr_un server_address;
 	server_address.sun_family = AF_UNIX;
 	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path));
-	sprintf(server_address.sun_path, "%s-%s", SOCKET_PREFIX, "server");
+	strcpy(server_address.sun_path, argv[1]);
 
 	// send connect message
 	struct msg_data connect_msg = {0};
@@ -163,19 +180,15 @@ int main()
 
 		// checking message type
 		if (connect_msg.type == RJCT)
-		{
-
 			exit(0);
-		}
 		else if (connect_msg.type == BINFO)
-		{
-			write_string(msg_win, "Connected to server\n");
 			break;
-		}
 	}
 
 	// create player
 	new_player(&player, connect_msg.field[0]);
+	mvwaddch(player_win, player.pos_y, player.pos_x, player.ch);
+	wrefresh(player_win);
 
 	int key = -1;
 	struct msg_data msg;
@@ -186,11 +199,10 @@ int main()
 		msg = (struct msg_data){0}; // clear message
 		msg.type = BMOV;
 		msg.player_id = client_id;
-		write_string(msg_win, "Waiting for key\n");
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
-			msg.dir = move_player(&player, key);
+			msg.dir = get_direction(&player, key);
 		else if (key == 27 || key == 'q')
 			break;
 		else
@@ -206,7 +218,6 @@ int main()
 			perror("Ball move sendto: ");
 			exit(-1);
 		}
-		write_string(msg_win, "Sent move msg\n");
 
 		// receive field status
 		while (1)
@@ -229,12 +240,11 @@ int main()
 			else if (msg.type == FSTATUS || msg.type == HP0)
 				break;
 		}
-		write_string(msg_win, "Received field status\n");
 
 		if (msg.type == HP0)
 		{
 			write_string(msg_win, "You died\nExiting...\n");
-			sleep(5);
+			sleep(3);
 			endwin();
 			close(client_socket);
 			unlink(client_address.sun_path);
@@ -242,7 +252,7 @@ int main()
 		}
 		else if (msg.type == FSTATUS)
 		{
-			draw_field(player_win, msg.field);
+			draw_field(player_win, msg_win, msg.field);
 		}
 	}
 	msg = (struct msg_data){0};
@@ -260,7 +270,7 @@ int main()
 		exit(-1);
 	}
 	write_string(msg_win, "Disconnected\nExiting...\n");
-	sleep(5);
+	sleep(3);
 
 	endwin();
 	close(client_socket);
