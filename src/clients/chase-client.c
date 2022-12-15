@@ -29,7 +29,7 @@ void new_player(player_t *player, struct msg_data msg)
 	player->c = msg.ch;
 }
 
-direction_t move_player(player_t *player, int direction)
+direction_t get_direction(player_t *player, int direction)
 {
 	if (player->y != 1 && direction == KEY_UP)
 		return UP;
@@ -187,7 +187,7 @@ int main()
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
-			msg.dir = move_player(&player, key);
+			msg.dir = get_direction(&player, key);
 
 		n_bytes = sendto(client_socket,
 						 &msg,
