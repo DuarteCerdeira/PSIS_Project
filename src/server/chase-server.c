@@ -25,7 +25,7 @@ struct client_info
 
 /* Global variables */
 static struct client_info players[MAX_PLAYERS];
-// static player_info_t bots[10];
+static struct client_info bots[MAX_PLAYERS];
 static int active_players;
 static char active_chars[MAX_PLAYERS];
 
@@ -173,6 +173,21 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 	move_player(win, &player->info, dir);
 }
 
+void handle_bots_conn(WINDOW *win, struct player_info_t *bots_init_info)
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (bots_init_info[i].ch == '\0')
+			break;
+		bots[i].id = BOTS_ID + i;
+		bots[i].info.ch = bots_init_info[i].ch;
+		bots[i].info.hp = bots_init_info[i].hp;
+		bots[i].info.pos_x = bots_init_info[i].pos_x;
+		bots[i].info.pos_y = bots_init_info[i].pos_y;
+		add_player(win, &bots[i].info);
+	}
+	return;
+}
 int main()
 {
 	// open socket
@@ -223,13 +238,6 @@ int main()
 
 	while (1)
 	{
-		// just printing msgs
-		// erase makes it cleaner, had to draw box again [A]
-		/* werase(msg_win); */
-		/* box(msg_win, 0, 0); */
-		/* mvwprintw(msg_win, 1, 1, "Waiting for msg\n"); */
-		/* wrefresh(msg_win); */
-
 		// wait for messages from clients
 		struct msg_data msg = {0};
 		int nbytes = recvfrom(server_socket, &msg, sizeof(msg), 0,
@@ -252,6 +260,12 @@ int main()
 		{
 		case (CONN):
 		{
+			// special case for bots client connection
+			if (msg.player_id == BOTS_ID - 1)
+			{
+				handle_bots_conn(game_win, msg.field);
+				break;
+			}
 			struct client_info *player = handle_connection(game_win, client_address);
 			if (player == NULL)
 			{
@@ -283,10 +297,15 @@ int main()
 			handle_disconnection(game_win, player);
 			active_players--;
 
-			break;
+		break;
 		}
 		case (BMOV):
 		{
+			// special case for bots movement
+			if (msg.player_id >= BOTS_ID)
+			{
+				break;
+			}
 			struct client_info *player = select_player(msg.player_id);
 			if (player == NULL)
 			{
@@ -317,7 +336,6 @@ int main()
 		default:
 			continue;
 		}
-
 		sendto(server_socket, &msg, sizeof(msg), 0,
 			   (struct sockaddr *)&client_address, client_address_size);
 

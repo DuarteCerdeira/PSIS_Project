@@ -9,6 +9,7 @@
 #define INIT_HP 5			   // Initial HP
 #define MAX_HP 10			   // Maximum HP
 #define MAX_PLAYERS 10		   // Maximum number of players
+#define BOTS_ID INT16_MAX + 2  // Bots ID
 
 // Message types
 typedef enum msg_type_t
