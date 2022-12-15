@@ -28,7 +28,5 @@ struct msg_data
 	int player_id;
 	msg_type_t type;
 	direction_t dir;
-	int hp;
-	char ch;
 	player_info_t field[MAX_PLAYERS * 3]; // max size -> 10 players + 10 bots + 10 prizes
 };

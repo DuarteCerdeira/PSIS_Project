@@ -242,11 +242,6 @@ int main()
 		}
 		if (nbytes == 0)
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Client disconnected\n");
-			wrefresh(msg_win);
-
 			int player_id = atoi(strrchr(client_address.sun_path, '-') + 1);
 			struct client_info *player = select_player(player_id);
 			handle_disconnection(game_win, player);
@@ -257,10 +252,6 @@ int main()
 		{
 		case (CONN):
 		{
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Handling connection request\n");
-			wrefresh(msg_win);
 			struct client_info *player = handle_connection(game_win, client_address);
 			if (player == NULL)
 			{
@@ -272,12 +263,11 @@ int main()
 				// HP and whatnot probably not needed [A]
 				msg.type = BINFO;
 				msg.player_id = player->id;
-				msg.ch = player->info.ch;
-				msg.hp = 5;
-				werase(msg_win);
-				box(msg_win, 0, 0);
-				mvwprintw(msg_win, 1, 1, "Sending player info to client\n");
-				wrefresh(msg_win);
+				msg.field[0].ch = player->info.ch;
+				msg.field[0].pos_x = player->info.pos_x;
+				msg.field[0].pos_y = player->info.pos_y;
+				msg.field[0].hp = player->info.hp;
+				msg.dir = NONE;
 			}
 			break;
 		}
@@ -292,10 +282,7 @@ int main()
 
 			handle_disconnection(game_win, player);
 			active_players--;
-			werase(msg_win);
-			box(msg_win, 0, 0);
-			mvwprintw(msg_win, 1, 1, "Player disconnected\n");
-			wrefresh(msg_win);
+
 			break;
 		}
 		case (BMOV):
