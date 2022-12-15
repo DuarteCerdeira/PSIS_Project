@@ -29,61 +29,6 @@ static struct client_info players[MAX_PLAYERS];
 static int active_players;
 static char active_chars[MAX_PLAYERS];
 
-void draw(WINDOW *win, player_info_t player, bool delete)
-{
-	if (delete)
-	{
-		mvwaddch(win, player.pos_y, player.pos_x, ' ');
-	}
-	else
-	{
-		mvwaddch(win, player.pos_y, player.pos_x, player.ch);
-	}
-	return;
-}
-
-void move_player(WINDOW *win, player_info_t *player, direction_t dir)
-{
-	draw(win, *player, true);
-
-	int new_x = player->pos_x;
-	int new_y = player->pos_y;
-
-	switch (dir)
-	{
-	case UP:
-		if (player->pos_y > 1)
-		{
-			new_y--;
-		}
-		break;
-	case DOWN:
-		if (player->pos_y < WINDOW_SIZE - 2)
-		{
-			new_y++;
-		}
-		break;
-	case LEFT:
-		if (player->pos_x > 1)
-		{
-			new_x--;
-		}
-		break;
-	case RIGHT:
-		if (player->pos_x < WINDOW_SIZE - 2)
-		{
-			new_x++;
-		}
-		break;
-	default:
-		break;
-	}
-
-	player->pos_x = new_x;
-	player->pos_y = new_y;
-	draw(win, *player, false);
-}
-
 struct client_info *check_collision(int x, int y, int id)
 {
 	// had to change structure bcs segfault [A]
@@ -146,7 +91,7 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 
 	active_chars[free_spot] = rand_char;
 
-	move_player(win, &players[free_spot].info, NONE);
+	add_player(win, &players[free_spot].info);
 
 	return &players[free_spot];
 }
@@ -190,7 +135,7 @@ void field_status(player_info_t *field)
 
 void handle_disconnection(WINDOW *win, struct client_info *player)
 {
-	draw(win, player->info, true);
+	delete_player(win, &player->info);
 	memset(player, 0, sizeof(struct client_info));
 
 	*strrchr(active_chars, player->info.ch) = '\0';
