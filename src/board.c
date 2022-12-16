@@ -54,12 +54,28 @@ void move_ball(WINDOW *win, ball_info_t *ball, direction_t dir)
 	draw(win, *ball, false);
 }
 
-void delete_ball(WINDOW *win, ball_info_t *ball)
+void add_ball(WINDOW *win, ball_info_t *ball) { draw(win, *ball, false); }
+
+void delete_ball(WINDOW *win, ball_info_t *ball) { draw(win, *ball, true); }
+
+void update_field(WINDOW *win, ball_info_t players[])
 {
-	draw(win, *ball, true);
+	werase(win);
+	box(win, 0, 0);
+	int i = 0;
+	while (players[i].ch != 0) {
+		mvwaddch(win, players[i].pos_y, players[i].pos_x, players[i].ch);
+		i++;
+	}
 }
 
-void add_ball(WINDOW *win, ball_info_t *ball)
+void update_stats(WINDOW *win, ball_info_t players[])
 {
-	draw(win, *ball, false);
+	werase(win);
+	box(win, 0, 0);
+	int i = 0;
+	while (players[i].ch != 0 && players[i].ch != '*') {
+		mvwprintw(win, i + 1, 1, "%c %d", players[i].ch, players[i].hp);
+		i++;
+	}
 }

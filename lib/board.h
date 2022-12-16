@@ -22,5 +22,8 @@ typedef struct ball_info
 } ball_info_t;
 
 void move_ball(WINDOW *win, ball_info_t *player, direction_t dir);
-void delete_ball(WINDOW *win, ball_info_t *player);
 void add_ball(WINDOW *win, ball_info_t *player);
+void delete_ball(WINDOW *win, ball_info_t *player);
+
+void update_field(WINDOW *win, ball_info_t players[]);
+void update_stats(WINDOW *win, ball_info_t players[]);
