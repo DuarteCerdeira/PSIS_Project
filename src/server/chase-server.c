@@ -16,40 +16,26 @@
 /* Local libraries */
 #include "../chase.h"
 
+#define INIT_X WINDOW_SIZE / 2 // Initial x position
+#define INIT_Y WINDOW_SIZE / 2 // Initial y position
+
 /* Client information structure */
 struct client_info
 {
 	int id;
-	player_info_t info;
+	ball_info_t info;
 };
 
 /* Global variables */
 static struct client_info players[MAX_PLAYERS];
 static struct client_info bots[MAX_PLAYERS];
+
 static int active_players;
 static char active_chars[MAX_PLAYERS];
 
-struct client_info *check_collision(int x, int y, int id)
-{
-	int i = 0;
+static int board_grid[WINDOW_SIZE][WINDOW_SIZE] = {false};
 
-	for (i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (players[i].info.pos_x == x && players[i].info.pos_y == y && players[i].id != id)
-		{
-			return &players[i];
-		}
-		else if (bots[i].info.pos_x == x && bots[i].info.pos_y == y && bots[i].id != id)
-		{
-			return &bots[i];
-		}
-		// TODO: ADD PRIZES COLLISION STUFF
-	}
-
-	return NULL;
-}
-
-struct client_info *select_player(int id)
+struct client_info *select_ball(int id)
 {
 	int i;
 	if (id >= BOTS_ID)
@@ -72,6 +58,26 @@ struct client_info *select_player(int id)
 
 		return i == MAX_PLAYERS ? NULL : &players[i];
 	}
+}
+
+struct client_info *check_collision(int x, int y, int id)
+{
+	/* int i = 0; */
+
+	/* for (i = 0; i < MAX_PLAYERS; i++) */
+	/* { */
+	/* 	if (balls[i].info.pos_x == x && balls[i].info.pos_y == y && balls[i].id != id) */
+	/* 	{ */
+	/* 		return &balls[i]; */
+	/* 	} */
+	/* 	else if (bots[i].info.pos_x == x && bots[i].info.pos_y == y && bots[i].id != id) */
+	/* 	{ */
+	/* 		return &bots[i]; */
+	/* 	} */
+	/* 	// TODO: ADD PRIZES COLLISION STUFF */
+	/* } */
+
+	return board_grid[x][y] > 0 ? select_ball(board_grid[x][y]) : NULL;
 }
 
 struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
@@ -108,12 +114,12 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 
 	active_chars[free_spot] = rand_char;
 
-	add_player(win, &players[free_spot].info);
+	add_ball(win, &players[free_spot].info);
 
 	return &players[free_spot];
 }
 
-void field_status(player_info_t *field)
+void field_status(ball_info_t *field)
 {
 	int j = 0;
 	for (int i = 0; (i < MAX_PLAYERS); i++, j++)
@@ -150,12 +156,15 @@ void field_status(player_info_t *field)
 
 void handle_disconnection(WINDOW *win, struct client_info *player)
 {
-	delete_player(win, &player->info);
+	delete_ball(win, &player->info);
 
-	if (player->id < BOTS_ID)
-		*strrchr(active_chars, player->info.ch) = '\0';
+	if (player->id < BOTS_ID) {
+		*strrchr(active_chars, player->info.ch) = active_chars[active_players];
+		active_chars[active_players] = '\0';
+	}
 
-	memset(player, 0, sizeof(struct client_info));
+	*player = players[active_players];
+	memset(&players[active_players], 0, sizeof(struct client_info));
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -187,10 +196,12 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 		dir = NONE;
 	}
 
-	move_player(win, &player->info, dir);
+	board_grid[player->info.pos_x][player->info.pos_y] = 0;
+	move_ball(win, &player->info, dir);
+	board_grid[player->info.pos_x][player->info.pos_y] = player->id;
 }
 
-void handle_bots_conn(WINDOW *win, struct player_info_t *bots_init_info)
+void handle_bots_conn(WINDOW *win, ball_info_t *bots_init_info)
 {
 	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -201,7 +212,7 @@ void handle_bots_conn(WINDOW *win, struct player_info_t *bots_init_info)
 		bots[i].info.hp = bots_init_info[i].hp;
 		bots[i].info.pos_x = bots_init_info[i].pos_x;
 		bots[i].info.pos_y = bots_init_info[i].pos_y;
-		add_player(win, &bots[i].info);
+		add_ball(win, &bots[i].info);
 	}
 	return;
 }
@@ -270,7 +281,7 @@ int main()
 		if (nbytes == 0)
 		{
 			int player_id = atoi(strrchr(client_address.sun_path, '-') + 1);
-			struct client_info *player = select_player(player_id);
+			struct client_info *player = select_ball(player_id);
 			handle_disconnection(game_win, player);
 			continue;
 		}
@@ -317,7 +328,7 @@ int main()
 		}
 		case (DCONN):
 		{
-			struct client_info *player = select_player(msg.player_id);
+			struct client_info *player = select_ball(msg.player_id);
 			if (player == NULL)
 			{
 				// player not found: do nothing
@@ -332,7 +343,7 @@ int main()
 		case (BMOV):
 		{
 			// "player" can be a bot or a client
-			struct client_info *player = select_player(msg.player_id);
+			struct client_info *player = select_ball(msg.player_id);
 			direction_t dir = msg.dir;
 			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
 			if (player == NULL)

@@ -1,46 +1,46 @@
 #include "../lib/board.h"
 
-void draw(WINDOW *win, player_info_t player, bool delete)
+void draw(WINDOW *win, ball_info_t ball, bool delete)
 {
 	if (delete)
 	{
-		mvwaddch(win, player.pos_y, player.pos_x, ' ');
+		mvwaddch(win, ball.pos_y, ball.pos_x, ' ');
 	}
 	else
 	{
-		mvwaddch(win, player.pos_y, player.pos_x, player.ch);
+		mvwaddch(win, ball.pos_y, ball.pos_x, ball.ch);
 	}
 }
 
-void move_player(WINDOW *win, player_info_t *player, direction_t dir)
+void move_ball(WINDOW *win, ball_info_t *ball, direction_t dir)
 {
-	draw(win, *player, true);
+	draw(win, *ball, true);
 
-	int new_x = player->pos_x;
-	int new_y = player->pos_y;
+	int new_x = ball->pos_x;
+	int new_y = ball->pos_y;
 
 	switch (dir)
 	{
 	case UP:
-		if (player->pos_y > 1)
+		if (ball->pos_y > 1)
 		{
 			new_y--;
 		}
 		break;
 	case DOWN:
-		if (player->pos_y < WINDOW_SIZE - 2)
+		if (ball->pos_y < WINDOW_SIZE - 2)
 		{
 			new_y++;
 		}
 		break;
 	case LEFT:
-		if (player->pos_x > 1)
+		if (ball->pos_x > 1)
 		{
 			new_x--;
 		}
 		break;
 	case RIGHT:
-		if (player->pos_x < WINDOW_SIZE - 2)
+		if (ball->pos_x < WINDOW_SIZE - 2)
 		{
 			new_x++;
 		}
@@ -49,17 +49,17 @@ void move_player(WINDOW *win, player_info_t *player, direction_t dir)
 		break;
 	}
 
-	player->pos_x = new_x;
-	player->pos_y = new_y;
-	draw(win, *player, false);
+	ball->pos_x = new_x;
+	ball->pos_y = new_y;
+	draw(win, *ball, false);
 }
 
-void delete_player(WINDOW *win, player_info_t *player)
+void delete_ball(WINDOW *win, ball_info_t *ball)
 {
-	draw(win, *player, true);
+	draw(win, *ball, true);
 }
 
-void add_player(WINDOW *win, player_info_t *player)
+void add_ball(WINDOW *win, ball_info_t *ball)
 {
-	draw(win, *player, false);
+	draw(win, *ball, false);
 }

@@ -55,7 +55,7 @@ void sigint_handler(int signum)
 	disconnect(true);
 }
 
-void new_player(player_t *player, player_info_t p_stats)
+void new_player(player_t *player, ball_info_t p_stats)
 {
 	player->pos_x = p_stats.pos_x;
 	player->pos_y = p_stats.pos_y;
@@ -85,7 +85,7 @@ direction_t get_direction(player_t *player, int direction)
 	}
 }
 
-void draw_field(WINDOW *game_win, WINDOW *msg_win, player_info_t *players)
+void draw_field(WINDOW *game_win, WINDOW *msg_win, ball_info_t *players)
 {
 	werase(game_win);
 	werase(msg_win);

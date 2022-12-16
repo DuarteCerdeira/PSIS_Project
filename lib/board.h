@@ -3,7 +3,7 @@
 #define WINDOW_SIZE 20		   // Window size
 
 // Direction
-typedef enum direction_t
+typedef enum direction
 {
 	NONE,
 	UP,
@@ -13,14 +13,14 @@ typedef enum direction_t
 } direction_t;
 
 // Player information
-typedef struct player_info_t
+typedef struct ball_info
 {
 	int pos_x;
 	int pos_y;
 	int hp;
 	char ch;
-} player_info_t;
+} ball_info_t;
 
-void move_player(WINDOW *win, player_info_t *player, direction_t dir);
-void delete_player(WINDOW *win, player_info_t *player);
-void add_player(WINDOW *win, player_info_t *player);
+void move_ball(WINDOW *win, ball_info_t *player, direction_t dir);
+void delete_ball(WINDOW *win, ball_info_t *player);
+void add_ball(WINDOW *win, ball_info_t *player);
