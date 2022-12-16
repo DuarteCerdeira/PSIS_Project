@@ -31,30 +31,47 @@ static char active_chars[MAX_PLAYERS];
 
 struct client_info *check_collision(int x, int y, int id)
 {
-	// had to change structure bcs segfault [A]
 	int i = 0;
+
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
 		if (players[i].info.pos_x == x && players[i].info.pos_y == y && players[i].id != id)
 		{
-			break;
+			return &players[i];
 		}
+		else if (bots[i].info.pos_x == x && bots[i].info.pos_y == y && bots[i].id != id)
+		{
+			return &bots[i];
+		}
+		// TODO: ADD PRIZES COLLISION STUFF
 	}
 
-	return i == MAX_PLAYERS ? NULL : &players[i];
+	return NULL;
 }
 
 struct client_info *select_player(int id)
 {
-	// had to change structure bcs segfault [A]
 	int i;
-	for (i = 0; i < MAX_PLAYERS; i++)
+	if (id >= BOTS_ID)
 	{
-		if (players[i].id == id)
-			break;
+		// The "player" is a bot
+		for (i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (bots[i].id == id)
+				break;
+		}
+		return i == MAX_PLAYERS ? NULL : &bots[i];
 	}
+	else
+	{
+		for (i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (players[i].id == id)
+				break;
+		}
 
-	return i == MAX_PLAYERS ? NULL : &players[i];
+		return i == MAX_PLAYERS ? NULL : &players[i];
+	}
 }
 
 struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
@@ -98,27 +115,21 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 
 void field_status(player_info_t *field)
 {
-	int i;
-	for (i = 0; i < MAX_PLAYERS; i++)
+	int j = 0;
+	for (int i = 0; (i < MAX_PLAYERS) && (players[i].id != 0); i++, j++)
 	{
-		if (players[i].id != 0)
-		{
-			field[i].ch = players[i].info.ch;
-			field[i].hp = players[i].info.hp;
-			field[i].pos_x = players[i].info.pos_x;
-			field[i].pos_y = players[i].info.pos_y;
-		}
+		field[i].ch = players[i].info.ch;
+		field[i].hp = players[i].info.hp;
+		field[i].pos_x = players[i].info.pos_x;
+		field[i].pos_y = players[i].info.pos_y;
 	}
-	// for (i; i < MAX_PLAYERS + i; i++)
-	// {
-	// 	if (bots[i].id == 0)
-	// 	{
-	// 		field[i].ch = bots[i].info.ch;
-	// 		field[i].hp = bots[i].info.hp;
-	// 		field[i].pos_x = bots[i].info.pos_x;
-	// 		field[i].pos_y = bots[i].info.pos_y;
-	// 	}
-	// }
+	for (int i = 0; (i < MAX_PLAYERS) && (bots[i].id != 0); i++, j++)
+	{
+		field[j].ch = bots[i].info.ch;
+		field[j].hp = bots[i].info.hp;
+		field[j].pos_x = bots[i].info.pos_x;
+		field[j].pos_y = bots[i].info.pos_y;
+	}
 
 	// for (i; i < MAX_PLAYERS + i; i++)
 	// {
@@ -136,9 +147,11 @@ void field_status(player_info_t *field)
 void handle_disconnection(WINDOW *win, struct client_info *player)
 {
 	delete_player(win, &player->info);
-	memset(player, 0, sizeof(struct client_info));
 
-	*strrchr(active_chars, player->info.ch) = '\0';
+	if (player->id < BOTS_ID)
+		*strrchr(active_chars, player->info.ch) = '\0';
+
+	memset(player, 0, sizeof(struct client_info));
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -188,6 +201,7 @@ void handle_bots_conn(WINDOW *win, struct player_info_t *bots_init_info)
 	}
 	return;
 }
+
 int main()
 {
 	// open socket
@@ -224,7 +238,7 @@ int main()
 	wrefresh(game_win);
 
 	// create the message window
-	WINDOW *msg_win = newwin(10, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(20, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
@@ -235,6 +249,7 @@ int main()
 
 	active_players = 0;					 // was not initialized, danger [A]
 	memset(players, 0, sizeof(players)); // was not initialized, caused seggs fault [A]
+	memset(bots, 0, sizeof(bots));		 // was not initialized
 
 	while (1)
 	{
@@ -260,13 +275,22 @@ int main()
 		{
 		case (CONN):
 		{
+			// (I left this if like this because i don't like nested IFs) [A]
 			// special case for bots client connection
-			if (msg.player_id == BOTS_ID - 1)
+			if (msg.player_id == BOTS_ID - 1 && bots[0].id != 0)
 			{
+				// bots already connected
+				// this prevents bots client from connecting more than once
+				continue;
+			}
+			else if (msg.player_id == BOTS_ID - 1)
+			{
+				// bots connection
 				handle_bots_conn(game_win, msg.field);
 				break;
 			}
 			struct client_info *player = handle_connection(game_win, client_address);
+			msg = (struct msg_data){0};
 			if (player == NULL)
 			{
 				// player limit reached: reject connection
@@ -274,7 +298,9 @@ int main()
 			}
 			else
 			{
-				// HP and whatnot probably not needed [A]
+				// Setting up the ball info msg
+				// We'll send the ball info by writing it
+				// in the array that usually holds the field status
 				msg.type = BINFO;
 				msg.player_id = player->id;
 				msg.field[0].ch = player->info.ch;
@@ -297,16 +323,14 @@ int main()
 			handle_disconnection(game_win, player);
 			active_players--;
 
-		break;
+			break;
 		}
 		case (BMOV):
 		{
-			// special case for bots movement
-			if (msg.player_id >= BOTS_ID)
-			{
-				break;
-			}
+			// "player" can be a bot or a client
 			struct client_info *player = select_player(msg.player_id);
+			direction_t dir = msg.dir;
+			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
 			if (player == NULL)
 			{
 				// player not found: do nothing
@@ -315,27 +339,34 @@ int main()
 			if (player->info.hp == 0)
 			{
 				// player hp is 0: disconnect player
+				if (player->id < BOTS_ID)
+				{
+					// is a client, not a bot
+					active_players--;
+					msg.type = HP0;
+				}
 				handle_disconnection(game_win, player);
-				msg.type = HP0;
-				active_players--;
 			}
 			else
 			{
-				handle_move(game_win, player, msg.dir);
+				handle_move(game_win, player, dir);
 
-				msg.type = FSTATUS;
-				field_status(msg.field);
-				msg.player_id = player->id;
-				werase(msg_win);
-				box(msg_win, 0, 0);
-				mvwprintw(msg_win, 1, 1, "Sending field status to client\n");
-				wrefresh(msg_win);
+				if (player->id < BOTS_ID)
+				{
+					// is a client, not a bot
+					msg.type = FSTATUS;
+					field_status(msg.field);
+					msg.player_id = player->id;
+				}
 			}
 			break;
 		}
 		default:
 			continue;
 		}
+		// This sendto is still okay when the sender was the bot client
+		// because the client address is empty
+		// So msg will be sent to no one
 		sendto(server_socket, &msg, sizeof(msg), 0,
 			   (struct sockaddr *)&client_address, client_address_size);
 

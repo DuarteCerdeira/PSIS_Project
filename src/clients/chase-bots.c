@@ -19,11 +19,16 @@ static int n_bots;
 
 int main(int argc, char *argv[])
 {
-	n_bots = atoi(argv[2]);
+	;
 	// Check arguments and its restrictions
-	if (argc != 3 && (n_bots < 1 || n_bots > 10))
+	if (argc != 3)
 	{
 		printf("Usage: %s <server_socket> <number_of_bots [1,10]>", argv[0]);
+		exit(-1);
+	}
+	else if ((n_bots = atoi(argv[2])) < 1 || n_bots > 10)
+	{
+		printf("Bots number must be an integer in range [1,10]\n");
 		exit(-1);
 	}
 

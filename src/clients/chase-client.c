@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <signal.h>
 
 /* NCurses */
 #include <ncurses.h>
@@ -20,6 +21,40 @@ typedef struct player_t
 	int hp;
 	char ch;
 } player_t;
+
+// Needed these to be global to be able to use them in the disconnect function
+static int client_socket;
+static struct sockaddr_un client_address;
+static struct sockaddr_un server_address;
+
+player_t player;
+int client_id;
+
+void disconnect(int send_msg)
+{
+	// The argument is used to know if we want to send a message to the server
+	// In the HP0 case we don't, but we do in any other case
+	// Even in the CTRL + C case
+	if (send_msg)
+	{
+		// Send a DCONN message to the server
+		struct msg_data msg = {0};
+		msg.player_id = client_id;
+		msg.type = DCONN;
+		sendto(client_socket, &msg, sizeof(msg), 0, (struct sockaddr *)&server_address, sizeof(server_address));
+	}
+	close(client_socket);
+	unlink(client_address.sun_path);
+	endwin();
+	exit(0);
+}
+
+// Function to deal with CTRL + C as a normal disconnect
+void sigint_handler(int signum)
+{
+	printf("CTRL + C captured\nDisconnecting...\n");
+	disconnect(true);
+}
 
 void new_player(player_t *player, player_info_t p_stats)
 {
@@ -68,8 +103,6 @@ void draw_field(WINDOW *game_win, WINDOW *msg_win, player_info_t *players)
 	wrefresh(game_win);
 	return;
 }
-player_t player;
-int client_id;
 
 void write_string(WINDOW *win, char *str)
 {
@@ -84,13 +117,16 @@ int main(int argc, char *argv[])
 	// get server address
 	if (argc < 2)
 	{
-		printf("Usage: %s <server_address>", argv[0]);
+		printf("Usage: %s <server_address>\n", argv[0]);
 		exit(-1);
 	}
 
+	// We want to catch
+	signal(SIGINT, sigint_handler);
+
 	client_id = getpid();
 	// open socket
-	int client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+	client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (client_socket == -1)
 	{
 		perror("socket: ");
@@ -98,7 +134,7 @@ int main(int argc, char *argv[])
 	}
 
 	// bind address
-	struct sockaddr_un client_address;
+
 	client_address.sun_family = AF_UNIX;
 	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
 	sprintf(client_address.sun_path, "%s-%d", SOCKET_PREFIX, client_id);
@@ -115,7 +151,6 @@ int main(int argc, char *argv[])
 	}
 
 	// server address
-	struct sockaddr_un server_address;
 	server_address.sun_family = AF_UNIX;
 	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path));
 	strcpy(server_address.sun_path, argv[1]);
@@ -243,36 +278,17 @@ int main(int argc, char *argv[])
 		if (msg.type == HP0)
 		{
 			write_string(msg_win, "You died\nExiting...\n");
-			sleep(3);
-			endwin();
-			close(client_socket);
-			unlink(client_address.sun_path);
-			exit(0);
+			disconnect(false);
 		}
 		else if (msg.type == FSTATUS)
 		{
 			draw_field(player_win, msg_win, msg.field);
 		}
 	}
-	msg = (struct msg_data){0};
-	msg.type = DCONN;
-	msg.player_id = client_id;
-	n_bytes = sendto(client_socket,
-					 &msg,
-					 sizeof(msg),
-					 0,
-					 (struct sockaddr *)&server_address,
-					 sizeof(server_address));
-	if (n_bytes == -1)
-	{
-		perror("Disconnect sendto: ");
-		exit(-1);
-	}
+
 	write_string(msg_win, "Disconnected\nExiting...\n");
+	disconnect(true);
 	sleep(3);
 
-	endwin();
-	close(client_socket);
-	unlink(client_address.sun_path);
 	exit(0);
 }
