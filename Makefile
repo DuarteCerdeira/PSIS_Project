@@ -14,6 +14,8 @@ SERVER_PATH := ./src/server/chase-server.c
 BOARD_PATH := ./src/board.c
 # Executable extension
 BOTS_PATH := ./src/clients/chase-bots.c
+
+PRIZES_PATH := ./src/clients/chase-prizes.c
 EXT := .out
 
 # NOTES: 
@@ -22,7 +24,7 @@ EXT := .out
 # - $^ is all dependencies
 
 # Default target
-all: client server bots
+all: client server bots prizes
 
 # Client executable
 client: chase-client.o board.o
@@ -35,6 +37,10 @@ server: chase-server.o board.o
 # Bots executables
 bots: chase-bots.o board.o
 	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-bots$(EXT) $(LFLAGS)
+
+# Prizes executables
+prizes: chase-prizes.o board.o
+	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-prizes$(EXT) $(LFLAGS)
 
 # Board object files
 board.o: $(BOARD_PATH) $(HEADERS)
@@ -51,6 +57,10 @@ chase-server.o: $(SERVER_PATH) $(HEADERS)
 # Bots object files
 chase-bots.o: $(BOTS_PATH) $(HEADERS)
 	$(CC) $(CFLAGS) -c $(BOTS_PATH) -o ./obj/chase-bots.o
+
+# Prizes object files
+chase-prizes.o: $(PRIZES_PATH) $(HEADERS)
+	$(CC) $(CFLAGS) -c $(PRIZES_PATH) -o ./obj/chase-prizes.o
 
 # Zip
 zip: ./src/$* ./Makefile ./bin
