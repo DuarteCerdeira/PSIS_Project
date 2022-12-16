@@ -98,11 +98,11 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	players[free_spot].info.pos_y = INIT_Y;
 
 	active_chars[free_spot] = rand_char;
-	
+
 	add_ball(win, &players[free_spot].info);
 
 	active_players++;
-	
+
 	return &players[free_spot];
 
 	/* 	players[active_players].id = atoi(client_address_pid); */
@@ -157,15 +157,18 @@ void handle_disconnection(WINDOW *win, struct client_info *player)
 {
 	delete_ball(win, &player->info);
 
-	if (player->id < BOTS_ID) {
-		*strrchr(active_chars, player->info.ch) = active_chars[active_players-1];
-		active_chars[active_players-1] = '\0';
+	if (player->id < BOTS_ID)
+	{
+		*strrchr(active_chars, player->info.ch) = active_chars[active_players - 1];
+		active_chars[active_players - 1] = '\0';
+		*player = players[active_players - 1];
+		memset(&players[active_players - 1], 0, sizeof(struct client_info));
+		active_players--;
 	}
-
-	*player = players[active_players-1];
-	
-	memset(&players[active_players-1], 0, sizeof(struct client_info));
-	active_players--;
+	else
+	{
+		memset(player, 0, sizeof(struct client_info));
+	}
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -357,8 +360,6 @@ int main()
 			if (player->info.hp == 0)
 			{
 				// player hp is 0: disconnect player
-				if (player->id < BOTS_ID)
-					active_players--; // if it's a client, decrease active players
 				msg.type = HP0;
 				handle_disconnection(game_win, player);
 			}

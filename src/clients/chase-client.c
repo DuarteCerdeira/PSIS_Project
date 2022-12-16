@@ -189,7 +189,7 @@ int main(int argc, char *argv[])
 	keypad(player_win, TRUE);
 
 	// message window
-	WINDOW *msg_win = newwin(5, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(20, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
