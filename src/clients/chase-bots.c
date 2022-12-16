@@ -20,11 +20,16 @@ static int n_bots;
 // I need these variables to be global to be able to use them in the disconnect function
 static int sock_fd;
 static struct sockaddr_un bots_addr;
+static struct sockaddr_un server_addr;
 
 // Function to deal with CTRL + C as a normal disconnect
 void disconnect()
 {
-
+	// Send disconnection message to server
+	struct msg_data msg = {0};
+	msg.player_id = BOTS_ID - 1;
+	msg.type = DCONN;
+	sendto(sock_fd, &msg, sizeof(msg), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
 	close(sock_fd);
 	unlink(bots_addr.sun_path);
 	exit(EXIT_SUCCESS);
@@ -72,7 +77,6 @@ int main(int argc, char *argv[])
 	}
 
 	// Connect to server
-	struct sockaddr_un server_addr;
 	server_addr.sun_family = AF_UNIX;
 	memset(server_addr.sun_path, 0, sizeof(server_addr.sun_path));
 	strcpy(server_addr.sun_path, argv[1]); // If cmd arg is the wrong path, messages won't be sent successfully

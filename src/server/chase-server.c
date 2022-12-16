@@ -98,11 +98,11 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	/* players[free_spot].info.pos_y = INIT_Y; */
 
 	/* active_chars[free_spot] = rand_char; */
-	
+
 	/* add_ball(win, &players[free_spot].info); */
 
 	/* active_players++; */
-	
+
 	/* return &players[free_spot]; */
 
 	players[active_players].id = atoi(client_address_pid);
@@ -222,6 +222,35 @@ void handle_bots_conn(WINDOW *win, ball_info_t *bots_init_info)
 	return;
 }
 
+void handle_bots_dconn(WINDOW *win)
+{
+	for (int i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (bots[i].id == 0)
+			continue;
+		delete_ball(win, &bots[i].info);
+		memset(&bots[i], 0, sizeof(struct client_info));
+	}
+	return;
+}
+
+void print_player_stats(WINDOW *win)
+{
+	ball_info_t p_stats[MAX_PLAYERS] = {0};
+	for (size_t i = 0; i < MAX_PLAYERS; i++)
+	{
+		if (players[i].id == 0)
+			continue;
+		p_stats[i].ch = players[i].info.ch;
+		p_stats[i].hp = players[i].info.hp;
+		p_stats[i].pos_x = players[i].info.pos_x;
+		p_stats[i].pos_y = players[i].info.pos_y;
+	}
+
+	update_stats(win, p_stats);
+	return;
+}
+
 int main()
 {
 	// open socket
@@ -337,6 +366,14 @@ int main()
 		}
 		case (DCONN):
 		{
+			// special case: bots disconnection
+			if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0)
+			{
+				// bots disconnection
+				handle_bots_dconn(game_win);
+				break;
+			}
+
 			struct client_info *player = select_ball(msg.player_id);
 			if (player == NULL)
 			{
@@ -391,6 +428,9 @@ int main()
 			   (struct sockaddr *)&client_address, client_address_size);
 
 		memset(&msg, 0, sizeof(msg));
+
+		// update msg window
+		print_player_stats(msg_win);
 
 		wrefresh(msg_win);
 		wrefresh(game_win);
