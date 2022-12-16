@@ -31,12 +31,26 @@ int main(int argc, char *argv[])
 		printf("Bots number must be an integer in range [1,10]\n");
 		exit(-1);
 	}
-
+	bool active_bots[n_bots];
 	int sock_fd;
 	sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (sock_fd < 0)
 	{
 		perror("socket");
+		exit(-1);
+	}
+
+	struct sockaddr_un bots_addr;
+	bots_addr.sun_family = AF_UNIX;
+	memset(bots_addr.sun_path, 0, sizeof(bots_addr.sun_path));
+	sprintf(bots_addr.sun_path, "%s-%s", SOCKET_PREFIX, "bots");
+
+	unlink(bots_addr.sun_path);
+
+	int err = bind(sock_fd, (struct sockaddr *)&bots_addr, sizeof(bots_addr));
+	if (err < 0)
+	{
+		perror("bind: ");
 		exit(-1);
 	}
 
@@ -54,8 +68,9 @@ int main(int argc, char *argv[])
 	srand(time(NULL));
 	for (int i = 0; i < n_bots; i++)
 	{
-		msg.field[i].pos_x = rand() % (WINDOW_SIZE - 1) + 1;
-		msg.field[i].pos_y = rand() % (WINDOW_SIZE - 1) + 1;
+		active_bots[i] = true;
+		msg.field[i].pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		msg.field[i].pos_y = rand() % (WINDOW_SIZE - 2) + 1;
 		msg.field[i].hp = INIT_HP;
 		msg.field[i].ch = '*';
 	}
@@ -68,11 +83,38 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
+	// Receive connection confirmation from server
+	struct sockaddr_un recv_addr;
+	socklen_t recv_addr_len = sizeof(recv_addr);
+	n_bytes = recvfrom(sock_fd, &msg, sizeof(msg), 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
+	if (n_bytes < 0)
+	{
+		perror("connect recvfrom: ");
+		exit(-1);
+	}
+	else if (strcmp(recv_addr.sun_path, server_addr.sun_path) != 0)
+	{
+		printf("Connect confirmation is not from server\n");
+		exit(-1);
+	}
+	else if (msg.type == CONN)
+	{
+		printf("Connected to server\n");
+	}
+	else
+	{
+		printf("Unexpected message type: %d\n", msg.type);
+		exit(-1);
+	}
+
 	while (1)
 	{
 		sleep(3);
 		for (int i = 0; i < n_bots; i++)
 		{
+			if (active_bots[i] == false)
+				continue;
+
 			msg = (struct msg_data){0};
 			msg.type = BMOV;
 			msg.dir = rand() % 4 + 1;
@@ -87,9 +129,43 @@ int main(int argc, char *argv[])
 				exit(-1);
 			}
 			printf("Bot %d sent Move %d\n", i + 1, msg.dir);
+
+			n_bytes = recvfrom(sock_fd, &msg, sizeof(msg), 0, (struct sockaddr *)&recv_addr, &recv_addr_len);
+			if (n_bytes < 0)
+			{
+				perror("recvfrom (BMOV)");
+				exit(-1);
+			}
+			else if (strcmp(recv_addr.sun_path, server_addr.sun_path) != 0)
+			{
+				printf("Move response is not from server\n");
+				exit(-1);
+			}
+			else if (msg.type == BMOV)
+			{
+				printf("Bot move successful\n\n");
+			}
+			else if (msg.type == HP0)
+			{
+				printf("Bot %d died\n\n", i + 1);
+				active_bots[i] = false;
+			}
+		}
+		// Check if all bots died
+		// If so, shut down
+		for (int i = 0; i < n_bots; i++)
+		{
+			if (active_bots[i])
+				break;
+			else if (i == n_bots - 1)
+			{
+				printf("All bots died\nShutting down\n");
+				unlink(bots_addr.sun_path);
+				close(sock_fd);
+				exit(EXIT_SUCCESS);
+			}
 		}
 		printf("------------SLEEPING------------\n");
 	}
-
 	exit(EXIT_SUCCESS);
 }

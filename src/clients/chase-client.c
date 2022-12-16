@@ -52,7 +52,6 @@ void disconnect(int send_msg)
 // Function to deal with CTRL + C as a normal disconnect
 void sigint_handler(int signum)
 {
-	printf("CTRL + C captured\nDisconnecting...\n");
 	disconnect(true);
 }
 
@@ -92,8 +91,10 @@ void draw_field(WINDOW *game_win, WINDOW *msg_win, ball_info_t *players)
 	werase(msg_win);
 	box(game_win, 0, 0);
 	box(msg_win, 0, 0);
-	for (int i = 0; i < MAX_PLAYERS && players[i].ch != 0; i++)
+	for (int i = 0; i < 3 * MAX_PLAYERS; i++)
 	{
+		if (players[i].ch == 0)
+			continue;
 		// draw player
 		mvwaddch(game_win, players[i].pos_y, players[i].pos_x, players[i].ch);
 		mvwprintw(msg_win, i + 1, 1, "%c %d", players[i].ch, players[i].hp);
