@@ -29,8 +29,10 @@ struct client_info
 /* Global variables */
 static struct client_info players[MAX_PLAYERS];
 static struct client_info bots[MAX_PLAYERS];
+static struct client_info prizes[MAX_PLAYERS];
 
 static int active_players;
+static int active_prizes;
 static char active_chars[MAX_PLAYERS];
 
 static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
@@ -38,6 +40,14 @@ static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 struct client_info *select_ball(long id)
 {
 	int i;
+	if (id < 0) {
+		for (i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (prizes[-i].id == id)
+				break;
+		}
+		return i == MAX_PLAYERS ? NULL : &prizes[-i];
+	}
 	if (id >= BOTS_ID)
 	{
 		// The "player" is a bot
@@ -62,7 +72,7 @@ struct client_info *select_ball(long id)
 
 struct client_info *check_collision(int x, int y, long id)
 {
-	return board_grid[x][y] > 0 ? select_ball(board_grid[x][y]) : NULL;
+	return board_grid[x][y] != 0 ? select_ball(board_grid[x][y]) : NULL;
 }
 
 struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
@@ -140,16 +150,17 @@ void field_status(ball_info_t *field)
 		j++;
 	}
 
-	// for (i; i < MAX_PLAYERS + i; i++)
-	// {
-	// 	if (prizes[i] != NULL)
-	// 	{
-	// 		field[i].ch = itoa(prizes[i].value);
-	// 		field[i].hp = -1;
-	// 		field[i].pos_x = prizes[i].pos_x;
-	// 		field[i].pos_y = prizes[i].pos_y;
-	// 	}
-	// }
+	for (int i; i < MAX_PLAYERS; i++)
+	{
+		if (prizes[i].id != 0)
+		{
+			field[j].ch = prizes[i].info.ch;
+			field[j].hp = prizes[i].info.hp;
+			field[j].pos_x = prizes[i].info.pos_x;
+			field[j].pos_y = prizes[i].info.pos_y;
+			j++;
+		}
+	}
 	return;
 }
 
@@ -192,18 +203,34 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 	default:
 		break;
 	}
+	if (player_hit == NULL) {
+		board_grid[player->info.pos_x][player->info.pos_y] = 0;
+		move_ball(win, &player->info, dir);
+		board_grid[player->info.pos_x][player->info.pos_y] = player->id;
+		return;
+	} else if (player_hit->id < 0) {
+		int health = player_hit->info.ch - '0';
+		player->info.hp += (player->info.hp == MAX_HP) ? 0 : health;
 
-	if (player_hit != NULL && player_hit->id < BOTS_ID)
-	{
+		*player_hit = prizes[active_prizes - 1];
+		memset(&prizes[active_players - 1], 0, sizeof(struct client_info));
+		active_prizes--;
+		
+		board_grid[player->info.pos_x][player->info.pos_y] = 0;
+		move_ball(win, &player->info, dir);
+		board_grid[player->info.pos_x][player->info.pos_y] = player->id;
+		return;
+	} else if (player_hit->id < BOTS_ID) {
 		player->info.hp == MAX_HP ? MAX_HP : player->info.hp++;
 		player_hit->info.hp == 0 ? 0 : player_hit->info.hp--;
 	}
-	dir = player_hit == NULL ? dir : NONE;
 
-	dir = (player_hit == NULL) ? dir : NONE;
+	dir = NONE;
+	
 	board_grid[player->info.pos_x][player->info.pos_y] = 0;
 	move_ball(win, &player->info, dir);
 	board_grid[player->info.pos_x][player->info.pos_y] = player->id;
+
 }
 
 void handle_bots_conn(WINDOW *win, ball_info_t *bots_init_info)
@@ -220,6 +247,29 @@ void handle_bots_conn(WINDOW *win, ball_info_t *bots_init_info)
 		add_ball(win, &bots[i].info);
 	}
 	return;
+}
+
+void create_prizes(WINDOW *win)
+{
+	srand(time(NULL));
+	for (int i = 0; i < 5 && active_prizes < 10; i++, active_prizes++) {
+		int value = rand() % 5;
+		int x;
+		int y;
+		do {
+			x = rand() % (WINDOW_SIZE - 2) + 1;
+			y = rand() % (WINDOW_SIZE - 2) + 1;
+		} while (board_grid[x][y] != 0);
+		
+		prizes[active_prizes].info.pos_x = x;
+		prizes[active_prizes].info.pos_y = y;
+		prizes[active_prizes].info.ch = value + '1';
+		prizes[active_prizes].info.hp = 0;
+		prizes[active_prizes].id = - i;
+		
+		board_grid[x][y] = prizes[active_prizes].id;
+		add_ball(win, &prizes[active_prizes].info);
+	}
 }
 
 int main()
@@ -313,6 +363,14 @@ int main()
 				msg.type = CONN;
 				break;
 			}
+
+			if (strcmp(client_address.sun_path, "/tmp/chase-socket-prizes") == 0) {
+				create_prizes(game_win);
+				msg = (struct msg_data){0};
+				msg.type = CONN; // successful
+				break;
+			}
+			
 			struct client_info *player = handle_connection(game_win, client_address);
 			msg = (struct msg_data){0};
 			if (player == NULL)
@@ -373,6 +431,7 @@ int main()
 					// player is a client, not a bot
 					msg.type = FSTATUS;
 					field_status(msg.field);
+					update_stats(msg_win, msg.field);
 					msg.player_id = player->id;
 				}
 				else
