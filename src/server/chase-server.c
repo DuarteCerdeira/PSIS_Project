@@ -22,7 +22,7 @@
 /* Client information structure */
 struct client_info
 {
-	int id;
+	long id;
 	ball_info_t info;
 };
 
@@ -35,7 +35,7 @@ static char active_chars[MAX_PLAYERS];
 
 static int board_grid[WINDOW_SIZE][WINDOW_SIZE] = {false};
 
-struct client_info *select_ball(int id)
+struct client_info *select_ball(long id)
 {
 	int i;
 	if (id >= BOTS_ID)
@@ -60,7 +60,7 @@ struct client_info *select_ball(int id)
 	}
 }
 
-struct client_info *check_collision(int x, int y, int id)
+struct client_info *check_collision(int x, int y, long id)
 {
 	return board_grid[x][y] > 0 ? select_ball(board_grid[x][y]) : NULL;
 }
@@ -91,7 +91,7 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 		free_spot++;
 	}
 
-	players[free_spot].id = atoi(client_address_pid);
+	players[free_spot].id = (long)atoi(client_address_pid);
 	players[free_spot].info.ch = rand_char;
 	players[free_spot].info.hp = INIT_HP;
 	players[free_spot].info.pos_x = INIT_X;
@@ -105,7 +105,7 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 
 	return &players[free_spot];
 
-	/* 	players[active_players].id = atoi(client_address_pid); */
+	/* players[active_players].id = atoi(client_address_pid); */
 	/* players[active_players].info.ch = rand_char; */
 	/* players[active_players].info.hp = INIT_HP; */
 	/* players[active_players].info.pos_x = INIT_X; */
@@ -193,12 +193,12 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 		break;
 	}
 
-	if (player_hit != NULL)
+	if (player_hit != NULL && player_hit->id < BOTS_ID)
 	{
 		player->info.hp == MAX_HP ? MAX_HP : player->info.hp++;
 		player_hit->info.hp == 0 ? 0 : player_hit->info.hp--;
-		dir = NONE;
 	}
+	dir = player_hit == NULL ? dir : NONE;
 
 	board_grid[player->info.pos_x][player->info.pos_y] = 0;
 	move_ball(win, &player->info, dir);
@@ -211,7 +211,7 @@ void handle_bots_conn(WINDOW *win, ball_info_t *bots_init_info)
 	{
 		if (bots_init_info[i].ch == '\0')
 			break;
-		bots[i].id = BOTS_ID + i;
+		bots[i].id = (long)BOTS_ID + i;
 		bots[i].info.ch = bots_init_info[i].ch;
 		bots[i].info.hp = bots_init_info[i].hp;
 		bots[i].info.pos_x = bots_init_info[i].pos_x;
@@ -257,7 +257,7 @@ int main()
 	wrefresh(game_win);
 
 	// create the message window
-	WINDOW *msg_win = newwin(20, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
@@ -284,7 +284,7 @@ int main()
 		}
 		if (nbytes == 0)
 		{
-			int player_id = atoi(strrchr(client_address.sun_path, '-') + 1);
+			long player_id = (long)atoi(strrchr(client_address.sun_path, '-') + 1);
 			struct client_info *player = select_ball(player_id);
 			handle_disconnection(game_win, player);
 			continue;
@@ -294,7 +294,7 @@ int main()
 		{
 		case (CONN):
 		{
-			// (I left this if like this because i don't like nested IFs) [A]
+			// (I left this IF like this because i don't like nested IFs) [A]
 			// special case for bots client connection
 			if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0 && bots[0].id != 0) // TODO: FIX
 			{

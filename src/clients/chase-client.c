@@ -15,20 +15,12 @@
 /* Local libraries */
 #include "../chase.h"
 
-typedef struct player_t
-{
-	int pos_x, pos_y;
-	int hp;
-	char ch;
-} player_t;
-
 // Needed these to be global to be able to use them in the disconnect function
 static int client_socket;
 static struct sockaddr_un client_address;
 static struct sockaddr_un server_address;
 
-player_t player;
-int client_id;
+long client_id;
 
 void disconnect(int send_msg)
 {
@@ -55,17 +47,9 @@ void sigint_handler(int signum)
 	disconnect(true);
 }
 
-void new_player(player_t *player, ball_info_t p_stats)
+direction_t get_direction(int direction)
 {
-	player->pos_x = p_stats.pos_x;
-	player->pos_y = p_stats.pos_y;
-	player->hp = p_stats.hp;
-	player->ch = p_stats.ch;
-	return;
-}
-
-direction_t get_direction(player_t *player, int direction)
-{
+	// Translate the key pressed to a direction
 	switch (direction)
 	{
 	case KEY_UP:
@@ -107,6 +91,7 @@ void draw_field(WINDOW *game_win, WINDOW *msg_win, ball_info_t *players)
 
 void write_string(WINDOW *win, char *str)
 {
+	// Just a function to write a string into the msg window
 	werase(win);
 	box(win, 0, 0);
 	mvwprintw(win, 1, 1, "%s", str);
@@ -125,7 +110,7 @@ int main(int argc, char *argv[])
 	// We want to catch
 	signal(SIGINT, sigint_handler);
 
-	client_id = getpid();
+	client_id = (long)getpid();
 	// open socket
 	client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (client_socket == -1)
@@ -138,7 +123,7 @@ int main(int argc, char *argv[])
 
 	client_address.sun_family = AF_UNIX;
 	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
-	sprintf(client_address.sun_path, "%s-%d", SOCKET_PREFIX, client_id);
+	sprintf(client_address.sun_path, "%s-%ld", SOCKET_PREFIX, client_id);
 
 	unlink(client_address.sun_path);
 
@@ -189,7 +174,7 @@ int main(int argc, char *argv[])
 	keypad(player_win, TRUE);
 
 	// message window
-	WINDOW *msg_win = newwin(20, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
@@ -221,8 +206,7 @@ int main(int argc, char *argv[])
 	}
 
 	// create player
-	new_player(&player, connect_msg.field[0]);
-	mvwaddch(player_win, player.pos_y, player.pos_x, player.ch);
+	mvwaddch(player_win, connect_msg.field[0].pos_y, connect_msg.field[0].pos_x, connect_msg.field[0].ch);
 	wrefresh(player_win);
 
 	int key = -1;
@@ -237,7 +221,7 @@ int main(int argc, char *argv[])
 
 		key = wgetch(player_win);
 		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
-			msg.dir = get_direction(&player, key);
+			msg.dir = get_direction(key);
 		else if (key == 27 || key == 'q')
 			break;
 		else
