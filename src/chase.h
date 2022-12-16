@@ -6,7 +6,7 @@
 #define INIT_HP 5			   // Initial HP
 #define MAX_HP 10			   // Maximum HP
 #define MAX_PLAYERS 10		   // Maximum number of players, bots AND prizes
-#define BOTS_ID INT16_MAX + 2  // Bots IDs start from this number onwards
+#define BOTS_ID (long) INT32_MAX + 2  // Bots IDs start from this number onwards
 
 // Message types
 typedef enum msg_type
@@ -23,7 +23,7 @@ typedef enum msg_type
 // Message data
 struct msg_data
 {
-	int player_id;
+	long player_id;
 	msg_type_t type;
 	direction_t dir;
 	ball_info_t field[MAX_PLAYERS * 3]; // max size -> 10 players + 10 bots + 10 prizes

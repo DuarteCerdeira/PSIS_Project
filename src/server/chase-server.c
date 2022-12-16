@@ -22,7 +22,7 @@
 /* Client information structure */
 struct client_info
 {
-	int id;
+	long id;
 	ball_info_t info;
 };
 
@@ -33,9 +33,9 @@ static struct client_info bots[MAX_PLAYERS];
 static int active_players;
 static char active_chars[MAX_PLAYERS];
 
-static int board_grid[WINDOW_SIZE][WINDOW_SIZE] = {false};
+static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 
-struct client_info *select_ball(int id)
+struct client_info *select_ball(long id)
 {
 	int i;
 	if (id >= BOTS_ID)
@@ -60,7 +60,7 @@ struct client_info *select_ball(int id)
 	}
 }
 
-struct client_info *check_collision(int x, int y, int id)
+struct client_info *check_collision(int x, int y, long id)
 {
 	return board_grid[x][y] > 0 ? select_ball(board_grid[x][y]) : NULL;
 }
@@ -85,52 +85,51 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 		rand_char = rand() % ('Z' - 'A') + 'A';
 	} while (strchr(active_chars, rand_char) != NULL);
 
-	int free_spot = 0;
-	while (players[free_spot].id != 0)
-	{
-		free_spot++;
-	}
+	/* int free_spot = 0; */
+	/* while (players[free_spot].id != 0) */
+	/* { */
+	/* 	free_spot++; */
+	/* } */
 
-	players[free_spot].id = atoi(client_address_pid);
-	players[free_spot].info.ch = rand_char;
-	players[free_spot].info.hp = INIT_HP;
-	players[free_spot].info.pos_x = INIT_X;
-	players[free_spot].info.pos_y = INIT_Y;
+	/* players[free_spot].id = atoi(client_address_pid); */
+	/* players[free_spot].info.ch = rand_char; */
+	/* players[free_spot].info.hp = INIT_HP; */
+	/* players[free_spot].info.pos_x = INIT_X; */
+	/* players[free_spot].info.pos_y = INIT_Y; */
 
-	active_chars[free_spot] = rand_char;
+	/* active_chars[free_spot] = rand_char; */
 	
-	add_ball(win, &players[free_spot].info);
+	/* add_ball(win, &players[free_spot].info); */
 
-	active_players++;
+	/* active_players++; */
 	
-	return &players[free_spot];
+	/* return &players[free_spot]; */
 
-	/* 	players[active_players].id = atoi(client_address_pid); */
-	/* players[active_players].info.ch = rand_char; */
-	/* players[active_players].info.hp = INIT_HP; */
-	/* players[active_players].info.pos_x = INIT_X; */
-	/* players[active_players].info.pos_y = INIT_Y; */
+	players[active_players].id = atoi(client_address_pid);
+	players[active_players].info.ch = rand_char;
+	players[active_players].info.hp = INIT_HP;
+	players[active_players].info.pos_x = INIT_X;
+	players[active_players].info.pos_y = INIT_Y;
 
-	/* active_chars[active_players] = rand_char; */
+	active_chars[active_players] = rand_char;
 
-	/* add_ball(win, &players[active_players].info); */
+	add_ball(win, &players[active_players].info);
 
-	/* return &players[active_players]; */
+	return &players[active_players++];
 }
 
 void field_status(ball_info_t *field)
 {
 	int j = 0;
-	for (int i = 0; i < active_players; i++, j++)
+	for (int i = 0; i < active_players; i++)
 	{
-		if (players[i].id == 0)
-			continue;
 		field[i].ch = players[i].info.ch;
 		field[i].hp = players[i].info.hp;
 		field[i].pos_x = players[i].info.pos_x;
 		field[i].pos_y = players[i].info.pos_y;
+		j++;
 	}
-	for (int i = 0; i < MAX_PLAYERS; i++, j++)
+	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
 		if (bots[i].id == 0)
 			continue;
@@ -138,6 +137,7 @@ void field_status(ball_info_t *field)
 		field[j].hp = bots[i].info.hp;
 		field[j].pos_x = bots[i].info.pos_x;
 		field[j].pos_y = bots[i].info.pos_y;
+		j++;
 	}
 
 	// for (i; i < MAX_PLAYERS + i; i++)
@@ -190,13 +190,13 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 		break;
 	}
 
-	if (player_hit != NULL)
+	if (player_hit != NULL && player_hit->id < BOTS_ID)
 	{
 		player->info.hp == MAX_HP ? MAX_HP : player->info.hp++;
 		player_hit->info.hp == 0 ? 0 : player_hit->info.hp--;
-		dir = NONE;
 	}
 
+	dir = (player_hit == NULL) ? dir : NONE;
 	board_grid[player->info.pos_x][player->info.pos_y] = 0;
 	move_ball(win, &player->info, dir);
 	board_grid[player->info.pos_x][player->info.pos_y] = player->id;
@@ -356,9 +356,6 @@ int main()
 			}
 			if (player->info.hp == 0)
 			{
-				// player hp is 0: disconnect player
-				if (player->id < BOTS_ID)
-					active_players--; // if it's a client, decrease active players
 				msg.type = HP0;
 				handle_disconnection(game_win, player);
 			}

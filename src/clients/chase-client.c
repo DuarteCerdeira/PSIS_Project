@@ -85,26 +85,6 @@ direction_t get_direction(player_t *player, int direction)
 	}
 }
 
-void draw_field(WINDOW *game_win, WINDOW *msg_win, ball_info_t *players)
-{
-	werase(game_win);
-	werase(msg_win);
-	box(game_win, 0, 0);
-	box(msg_win, 0, 0);
-	for (int i = 0; i < 3 * MAX_PLAYERS; i++)
-	{
-		if (players[i].ch == 0)
-			continue;
-		// draw player
-		mvwaddch(game_win, players[i].pos_y, players[i].pos_x, players[i].ch);
-		mvwprintw(msg_win, i + 1, 1, "%c %d", players[i].ch, players[i].hp);
-	}
-
-	wrefresh(msg_win);
-	wrefresh(game_win);
-	return;
-}
-
 void write_string(WINDOW *win, char *str)
 {
 	werase(win);
@@ -189,7 +169,7 @@ int main(int argc, char *argv[])
 	keypad(player_win, TRUE);
 
 	// message window
-	WINDOW *msg_win = newwin(5, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	WINDOW *msg_win = newwin(20, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
@@ -283,7 +263,10 @@ int main(int argc, char *argv[])
 		}
 		else if (msg.type == FSTATUS)
 		{
-			draw_field(player_win, msg_win, msg.field);
+			update_field(player_win, msg.field);
+			update_stats(msg_win, msg.field);
+			wrefresh(msg_win);
+			wrefresh(player_win);
 		}
 	}
 
