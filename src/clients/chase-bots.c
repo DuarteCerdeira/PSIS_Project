@@ -40,6 +40,20 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
+	struct sockaddr_un bots_addr;
+	bots_addr.sun_family = AF_UNIX;
+	memset(bots_addr.sun_path, 0, sizeof(bots_addr.sun_path));
+	sprintf(bots_addr.sun_path, "%s-%s", SOCKET_PREFIX, "bots");
+
+	unlink(bots_addr.sun_path);
+
+	int err = bind(sock_fd, (struct sockaddr *)&bots_addr, sizeof(bots_addr));
+	if (err < 0)
+	{
+		perror("bind: ");
+		exit(-1);
+	}
+
 	// Connect to server
 	struct sockaddr_un server_addr;
 	server_addr.sun_family = AF_UNIX;
@@ -54,8 +68,8 @@ int main(int argc, char *argv[])
 	srand(time(NULL));
 	for (int i = 0; i < n_bots; i++)
 	{
-		msg.field[i].pos_x = rand() % (WINDOW_SIZE - 1) + 1;
-		msg.field[i].pos_y = rand() % (WINDOW_SIZE - 1) + 1;
+		msg.field[i].pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		msg.field[i].pos_y = rand() % (WINDOW_SIZE - 2) + 1;
 		msg.field[i].hp = INIT_HP;
 		msg.field[i].ch = '*';
 	}
@@ -70,7 +84,7 @@ int main(int argc, char *argv[])
 
 	while (1)
 	{
-		sleep(3);
+		sleep(10);
 		for (int i = 0; i < n_bots; i++)
 		{
 			msg = (struct msg_data){0};

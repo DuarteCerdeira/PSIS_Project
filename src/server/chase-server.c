@@ -116,15 +116,19 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 void field_status(player_info_t *field)
 {
 	int j = 0;
-	for (int i = 0; (i < MAX_PLAYERS) && (players[i].id != 0); i++, j++)
+	for (int i = 0; (i < MAX_PLAYERS); i++, j++)
 	{
+		if (players[i].id == 0)
+			continue;
 		field[i].ch = players[i].info.ch;
 		field[i].hp = players[i].info.hp;
 		field[i].pos_x = players[i].info.pos_x;
 		field[i].pos_y = players[i].info.pos_y;
 	}
-	for (int i = 0; (i < MAX_PLAYERS) && (bots[i].id != 0); i++, j++)
+	for (int i = 0; (i < MAX_PLAYERS); i++, j++)
 	{
+		if (bots[i].id == 0)
+			continue;
 		field[j].ch = bots[i].info.ch;
 		field[j].hp = bots[i].info.hp;
 		field[j].pos_x = bots[i].info.pos_x;
