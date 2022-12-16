@@ -158,7 +158,8 @@ void handle_disconnection(WINDOW *win, struct client_info *player)
 {
 	delete_ball(win, &player->info);
 
-	if (player->id < BOTS_ID) {
+	if (player->id < BOTS_ID)
+	{
 		*strrchr(active_chars, player->info.ch) = active_chars[active_players];
 		active_chars[active_players] = '\0';
 	}
@@ -292,16 +293,20 @@ int main()
 		{
 			// (I left this if like this because i don't like nested IFs) [A]
 			// special case for bots client connection
-			if (msg.player_id == BOTS_ID - 1 && bots[0].id != 0)
+			if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0 && bots[0].id != 0) // TODO: FIX
 			{
 				// bots already connected
 				// this prevents bots client from connecting more than once
 				continue;
 			}
-			else if (msg.player_id == BOTS_ID - 1)
+			else if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0)
 			{
 				// bots connection
 				handle_bots_conn(game_win, msg.field);
+				msg = (struct msg_data){0};
+				// We'll send back CONN to the bots client
+				// to let it know that the connection was successful
+				msg.type = CONN;
 				break;
 			}
 			struct client_info *player = handle_connection(game_win, client_address);
@@ -355,11 +360,8 @@ int main()
 			{
 				// player hp is 0: disconnect player
 				if (player->id < BOTS_ID)
-				{
-					// is a client, not a bot
-					active_players--;
-					msg.type = HP0;
-				}
+					active_players--; // if it's a client, decrease active players
+				msg.type = HP0;
 				handle_disconnection(game_win, player);
 			}
 			else
@@ -368,9 +370,15 @@ int main()
 
 				if (player->id < BOTS_ID)
 				{
-					// is a client, not a bot
+					// player is a client, not a bot
 					msg.type = FSTATUS;
 					field_status(msg.field);
+					msg.player_id = player->id;
+				}
+				else
+				{
+					// sending confirmation of the move to the bot
+					msg.type = BMOV;
 					msg.player_id = player->id;
 				}
 			}
@@ -379,9 +387,6 @@ int main()
 		default:
 			continue;
 		}
-		// This sendto is still okay when the sender was the bot client
-		// because the client address is empty
-		// So msg will be sent to no one
 		sendto(server_socket, &msg, sizeof(msg), 0,
 			   (struct sockaddr *)&client_address, client_address_size);
 
