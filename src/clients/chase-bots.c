@@ -36,7 +36,7 @@ int main(int argc, char *argv[])
 	sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (sock_fd < 0)
 	{
-		perror("socket");
+		perror("socket: ");
 		exit(-1);
 	}
 
