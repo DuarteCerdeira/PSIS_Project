@@ -62,21 +62,6 @@ struct client_info *select_ball(int id)
 
 struct client_info *check_collision(int x, int y, int id)
 {
-	/* int i = 0; */
-
-	/* for (i = 0; i < MAX_PLAYERS; i++) */
-	/* { */
-	/* 	if (balls[i].info.pos_x == x && balls[i].info.pos_y == y && balls[i].id != id) */
-	/* 	{ */
-	/* 		return &balls[i]; */
-	/* 	} */
-	/* 	else if (bots[i].info.pos_x == x && bots[i].info.pos_y == y && bots[i].id != id) */
-	/* 	{ */
-	/* 		return &bots[i]; */
-	/* 	} */
-	/* 	// TODO: ADD PRIZES COLLISION STUFF */
-	/* } */
-
 	return board_grid[x][y] > 0 ? select_ball(board_grid[x][y]) : NULL;
 }
 
@@ -113,23 +98,37 @@ struct client_info *handle_connection(WINDOW *win, struct sockaddr_un client)
 	players[free_spot].info.pos_y = INIT_Y;
 
 	active_chars[free_spot] = rand_char;
-
+	
 	add_ball(win, &players[free_spot].info);
 
+	active_players++;
+	
 	return &players[free_spot];
+
+	/* 	players[active_players].id = atoi(client_address_pid); */
+	/* players[active_players].info.ch = rand_char; */
+	/* players[active_players].info.hp = INIT_HP; */
+	/* players[active_players].info.pos_x = INIT_X; */
+	/* players[active_players].info.pos_y = INIT_Y; */
+
+	/* active_chars[active_players] = rand_char; */
+
+	/* add_ball(win, &players[active_players].info); */
+
+	/* return &players[active_players]; */
 }
 
 void field_status(ball_info_t *field)
 {
 	int j = 0;
-	for (int i = 0; (i < MAX_PLAYERS) && (players[i].id != 0); i++, j++)
+	for (int i = 0; i < active_players; i++, j++)
 	{
 		field[i].ch = players[i].info.ch;
 		field[i].hp = players[i].info.hp;
 		field[i].pos_x = players[i].info.pos_x;
 		field[i].pos_y = players[i].info.pos_y;
 	}
-	for (int i = 0; (i < MAX_PLAYERS) && (bots[i].id != 0); i++, j++)
+	for (int i = 0; i < MAX_PLAYERS; i++, j++)
 	{
 		field[j].ch = bots[i].info.ch;
 		field[j].hp = bots[i].info.hp;
@@ -155,12 +154,14 @@ void handle_disconnection(WINDOW *win, struct client_info *player)
 	delete_ball(win, &player->info);
 
 	if (player->id < BOTS_ID) {
-		*strrchr(active_chars, player->info.ch) = active_chars[active_players];
-		active_chars[active_players] = '\0';
+		*strrchr(active_chars, player->info.ch) = active_chars[active_players-1];
+		active_chars[active_players-1] = '\0';
 	}
 
-	*player = players[active_players];
-	memset(&players[active_players], 0, sizeof(struct client_info));
+	*player = players[active_players-1];
+	
+	memset(&players[active_players-1], 0, sizeof(struct client_info));
+	active_players--;
 }
 
 void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
@@ -332,8 +333,6 @@ int main()
 			}
 
 			handle_disconnection(game_win, player);
-			active_players--;
-
 			break;
 		}
 		case (BMOV):
