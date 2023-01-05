@@ -69,6 +69,8 @@ int main(int argc, char *argv[])
 	memset(bots_addr.sun_path, 0, sizeof(bots_addr.sun_path));
 	sprintf(bots_addr.sun_path, "%s-%s", SOCKET_PREFIX, "bots");
 
+	unlink(bots_addr.sun_path);
+
 	int err = bind(sock_fd, (struct sockaddr *)&bots_addr, sizeof(bots_addr));
 	if (err < 0)
 	{

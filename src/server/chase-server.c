@@ -212,7 +212,7 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 		board_grid[player->info.pos_x][player->info.pos_y] = player->id;
 		return;
 	}
-	else if (player_hit->id < 0)
+	else if (player_hit->id < 0 && player->id < BOTS_ID)
 	{
 		int health = player_hit->info.hp;
 		player->info.hp += (player->info.hp + health > MAX_HP) ? 0 : health;
@@ -356,9 +356,8 @@ int main()
 
 	// store client information
 	struct sockaddr_un client_address;
-	socklen_t client_address_size = sizeof(client_address);
-	memset(&client_address.sun_path, '\0', sizeof(client_address.sun_path));
-
+	socklen_t client_address_size;
+	
 	active_players = 0;					 // was not initialized, danger [A]
 	memset(players, 0, sizeof(players)); // was not initialized, caused seggs fault [A]
 	memset(bots, 0, sizeof(bots));		 // was not initialized
@@ -366,6 +365,10 @@ int main()
 	while (1)
 	{
 		// wait for messages from clients
+
+		memset(&client_address.sun_path, '\0', sizeof(client_address.sun_path));
+		client_address_size = sizeof(struct sockaddr_un);
+
 		struct msg_data msg = {0};
 		int nbytes = recvfrom(server_socket, &msg, sizeof(msg), 0,
 							  (struct sockaddr *)&client_address, &client_address_size);
