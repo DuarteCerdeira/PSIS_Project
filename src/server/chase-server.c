@@ -42,12 +42,13 @@ struct client_info *select_ball(long id)
 	int i;
 	if (id < 0)
 	{
-		for (i = 0; i < MAX_PLAYERS; i++)
-		{
-			if (prizes[-i].id == id)
-				break;
-		}
-		return i == MAX_PLAYERS ? NULL : &prizes[-i];
+		/* for (i = 0; i < MAX_PLAYERS; i++) */
+		/* { */
+		/* 	if (prizes[i].id == id) */
+		/* 		break; */
+		/* } */
+		/* return i == MAX_PLAYERS ? NULL : &prizes[i]; */
+		return &prizes[-id - 1];
 	}
 	if (id >= BOTS_ID)
 	{
@@ -151,7 +152,7 @@ void field_status(ball_info_t *field)
 		j++;
 	}
 
-	for (int i; i < MAX_PLAYERS; i++)
+	for (int i = 0; i < MAX_PLAYERS; i++)
 	{
 		if (prizes[i].id != 0)
 		{
@@ -213,13 +214,18 @@ void handle_move(WINDOW *win, struct client_info *player, direction_t dir)
 	}
 	else if (player_hit->id < 0)
 	{
-		int health = player_hit->info.ch - '0';
-		player->info.hp += (player->info.hp == MAX_HP) ? 0 : health;
+		int health = player_hit->info.hp;
+		player->info.hp += (player->info.hp + health > MAX_HP) ? 0 : health;
 
-		*player_hit = prizes[active_prizes - 1];
-		memset(&prizes[active_players - 1], 0, sizeof(struct client_info));
+		struct client_info *last_prize = &prizes[active_prizes - 1];
+
+		last_prize->id = player_hit->id;
+		board_grid[last_prize->info.pos_x][last_prize->info.pos_y] = player_hit->id;
+
+		*player_hit = *last_prize;
+		memset(last_prize, 0, sizeof(struct client_info));
 		active_prizes--;
-
+		
 		board_grid[player->info.pos_x][player->info.pos_y] = 0;
 		move_ball(win, &player->info, dir);
 		board_grid[player->info.pos_x][player->info.pos_y] = player->id;
@@ -288,7 +294,7 @@ void create_prizes(WINDOW *win)
 	srand(time(NULL));
 	for (int i = 0; i < 5 && active_prizes < 10; i++, active_prizes++)
 	{
-		int value = rand() % 5;
+		int value = rand() % 5 + 1;
 		int x;
 		int y;
 		do
@@ -299,9 +305,9 @@ void create_prizes(WINDOW *win)
 
 		prizes[active_prizes].info.pos_x = x;
 		prizes[active_prizes].info.pos_y = y;
-		prizes[active_prizes].info.ch = value + '1';
-		prizes[active_prizes].info.hp = 0;
-		prizes[active_prizes].id = -i;
+		prizes[active_prizes].info.ch = value + '0';
+		prizes[active_prizes].info.hp = value;
+		prizes[active_prizes].id = -(active_prizes + 1);
 
 		board_grid[x][y] = prizes[active_prizes].id;
 		add_ball(win, &prizes[active_prizes].info);
