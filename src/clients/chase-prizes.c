@@ -58,7 +58,6 @@ int main()
 
 	while (1)
 	{
-		sleep(5);
 		n_bytes = sendto(socket_fd, &msg, sizeof(msg), 0, (struct sockaddr *)&server_addr, sizeof(server_addr));
 		if (n_bytes == -1)
 		{
@@ -87,6 +86,8 @@ int main()
 			close(socket_fd);
 			exit(EXIT_FAILURE);
 		}
+		
+		sleep(5);
 	}
 	close(socket_fd);
 	exit(EXIT_SUCCESS);

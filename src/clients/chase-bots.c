@@ -93,7 +93,7 @@ int main(int argc, char *argv[])
 	{
 		msg.field[i].pos_x = rand() % (WINDOW_SIZE - 2) + 1;
 		msg.field[i].pos_y = rand() % (WINDOW_SIZE - 2) + 1;
-		msg.field[i].hp = INIT_HP;
+		msg.field[i].hp = MAX_HP;
 		msg.field[i].ch = '*';
 	}
 

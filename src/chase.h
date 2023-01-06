@@ -3,7 +3,6 @@
 // Server Socket
 #define SOCKET_PREFIX "/tmp/chase-socket"
 
-#define INIT_HP 5					// Initial HP
 #define MAX_HP 10					// Maximum HP
 #define MAX_PLAYERS 10				// Maximum number of players, bots AND prizes
 #define BOTS_ID (long)INT32_MAX + 2 // Bots IDs start from this number onwards
