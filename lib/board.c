@@ -1,4 +1,4 @@
-#include "../lib/board.h"
+#include "board.h"
 
 void draw(WINDOW *win, ball_info_t ball, bool delete)
 {

@@ -11,7 +11,7 @@ CLIENT_PATH := ./src/clients/chase-client.c
 # Server source code path
 SERVER_PATH := ./src/server/chase-server.c
 # Board source code path
-BOARD_PATH := ./src/board.c
+BOARD_PATH := ./lib/board.c
 # Executable extension
 BOTS_PATH := ./src/clients/chase-bots.c
 
