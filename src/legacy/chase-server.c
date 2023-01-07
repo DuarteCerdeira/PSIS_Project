@@ -123,7 +123,6 @@ void field_status(ball_info_t *field)
 	return;
 }
 
-<<<<<<< Updated upstream
 struct client_info *handle_player_connection(WINDOW *win, struct sockaddr_un client)
 {
 	// Player limit reached
@@ -279,8 +278,6 @@ void handle_bots_disconnection(WINDOW *win)
 	return;
 }
 
-=======
->>>>>>> Stashed changes
 void print_player_stats(WINDOW *win)
 {
 	ball_info_t p_stats[MAX_PLAYERS] = {0};
@@ -376,7 +373,6 @@ int main()
 	memset(players, 0, sizeof(players)); // was not initialized, caused seggs fault [A]
 	memset(bots, 0, sizeof(bots));		 // was not initialized
 
-<<<<<<< Updated upstream
 	while (1)
 	{
 		// Wait for messages from clients
@@ -549,6 +545,4 @@ int main()
 	}
 	endwin();
 	exit(0);
-=======
->>>>>>> Stashed changes
 }
