@@ -3,7 +3,7 @@ CC := gcc
 # Compiler flags
 CFLAGS := -Wall -g
 # Linker flags
-LFLAGS := -lncurses
+LFLAGS := -lncurses -lpthread
 # Header files
 HEADERS := $(wildcard $(SRCPATH)/*.h) ./lib/*.h
 # Client source code path
@@ -12,10 +12,9 @@ CLIENT_PATH := ./src/clients/chase-client.c
 SERVER_PATH := ./src/server/chase-server.c
 # Board source code path
 BOARD_PATH := ./lib/board.c
-# Executable extension
-BOTS_PATH := ./src/clients/chase-bots.c
 
 PRIZES_PATH := ./src/clients/chase-prizes.c
+# Executable extension
 EXT := .out
 
 # NOTES: 
@@ -24,7 +23,7 @@ EXT := .out
 # - $^ is all dependencies
 
 # Default target
-all: client server bots prizes
+all: client server prizes
 
 # Client executable
 client: chase-client.o board.o
@@ -34,9 +33,6 @@ client: chase-client.o board.o
 server: chase-server.o board.o
 	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-server$(EXT) $(LFLAGS)
 
-# Bots executables
-bots: chase-bots.o board.o
-	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-bots$(EXT) $(LFLAGS)
 
 # Prizes executables
 prizes: chase-prizes.o board.o
@@ -54,9 +50,6 @@ chase-client.o: $(CLIENT_PATH) $(HEADERS)
 chase-server.o: $(SERVER_PATH) $(HEADERS)
 	$(CC) $(CFLAGS) -c $(SERVER_PATH) -o ./obj/chase-server.o
 
-# Bots object files
-chase-bots.o: $(BOTS_PATH) $(HEADERS)
-	$(CC) $(CFLAGS) -c $(BOTS_PATH) -o ./obj/chase-bots.o
 
 # Prizes object files
 chase-prizes.o: $(PRIZES_PATH) $(HEADERS)

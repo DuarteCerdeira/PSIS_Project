@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <pthread.h>
 
 /* NCurses */
 #include <ncurses.h>
@@ -35,19 +36,23 @@ static int active_players;
 static int active_prizes;
 static char active_chars[MAX_PLAYERS];
 
+// Windows
+WINDOW *game_win = NULL;
+WINDOW *msg_win = NULL;
+
 static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 
 struct client_info *select_ball(long id)
 {
 	int i;
 	struct client_info *ball;
-	
+
 	// Ball is a prize
 	if (id < 0)
 	{
 		ball = &prizes[-id - 1];
 	}
-	
+
 	// Ball is a bot
 	else if (id >= BOTS_ID)
 	{
@@ -60,7 +65,7 @@ struct client_info *select_ball(long id)
 		}
 		ball = (i == MAX_PLAYERS) ? NULL : &bots[i];
 	}
-	
+
 	// Ball is a player
 	else
 	{
@@ -85,7 +90,7 @@ struct client_info *check_collision(int x, int y, long id)
 void field_status(ball_info_t *field)
 {
 	int j = 0;
-	
+
 	// Fills out players information
 	for (int i = 0; i < active_players; i++)
 	{
@@ -169,7 +174,7 @@ void handle_player_disconnection(WINDOW *win, struct client_info *player)
 	*strrchr(active_chars, player->info.ch) = active_chars[active_players - 1];
 	active_chars[active_players - 1] = '\0';
 
-	// Delete player information 
+	// Delete player information
 	*player = players[active_players - 1];
 	memset(&players[active_players - 1], 0, sizeof(struct client_info));
 
@@ -221,7 +226,7 @@ void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
 
 		// Prize is deleted
 		struct client_info *last_prize = &prizes[active_prizes - 1];
-		
+
 		last_prize->id = ball_hit->id;
 		board_grid[last_prize->info.pos_x][last_prize->info.pos_y] = ball_hit->id;
 
@@ -246,38 +251,6 @@ void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
 	board_grid[ball->info.pos_x][ball->info.pos_y] = ball->id;
 }
 
-void handle_bots_connection(WINDOW *win, ball_info_t *bots_init_info)
-{
-	for (int i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (bots_init_info[i].ch == '\0')
-			break;
-
-		// Initialize bots information
-		bots[i].id = (long)BOTS_ID + i;
-		bots[i].info.ch = bots_init_info[i].ch;
-		bots[i].info.hp = bots_init_info[i].hp;
-		bots[i].info.pos_x = bots_init_info[i].pos_x;
-		bots[i].info.pos_y = bots_init_info[i].pos_y;
-		add_ball(win, &bots[i].info);
-	}
-	return;
-}
-
-void handle_bots_disconnection(WINDOW *win)
-{
-	for (int i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (bots[i].id == 0)
-			continue;
-
-		// Delete bots information
-		delete_ball(win, &bots[i].info);
-		memset(&bots[i], 0, sizeof(struct client_info));
-	}
-	return;
-}
-
 void print_player_stats(WINDOW *win)
 {
 	ball_info_t p_stats[MAX_PLAYERS] = {0};
@@ -285,7 +258,7 @@ void print_player_stats(WINDOW *win)
 	{
 		if (players[i].id == 0)
 			continue;
-		
+
 		p_stats[i].ch = players[i].info.ch;
 		p_stats[i].hp = players[i].info.hp;
 		p_stats[i].pos_x = players[i].info.pos_x;
@@ -325,8 +298,55 @@ void create_prizes(WINDOW *win)
 	}
 }
 
-int main()
+// Thread function that handles bots movement
+void *handle_bots(void *arg)
 {
+	int n_bots = *(int *)arg;
+
+	// Create bots
+	for (int i = 0; i < n_bots; i++)
+	{
+		// Initialize bots information
+		bots[i].id = (long)BOTS_ID + i;
+		bots[i].info.ch = '*';
+		bots[i].info.hp = MAX_HP;
+		bots[i].info.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		bots[i].info.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
+		add_ball(game_win, &bots[i].info);
+	}
+
+	while (1)
+	{
+		for (int i = 0; i < MAX_PLAYERS; i++)
+		{
+			if (bots[i].id == 0)
+				continue;
+
+			// Get a random direction
+			direction_t dir = random() % 4 + 1;
+			handle_move(game_win, &bots[i], dir);
+			board_grid[bots[i].info.pos_x][bots[i].info.pos_y] = bots[i].id;
+		}
+		wrefresh(game_win);
+		sleep(3);
+	}
+}
+
+int main(int argc, char *argv[])
+{
+	int n_bots = 0;
+	// Check arguments and its restrictions
+	if (argc != 4)
+	{
+		printf("Usage: %s <server_IP> <server_port> <number_of_bots [1,10]>", argv[0]);
+		exit(-1);
+	}
+	else if ((n_bots = atoi(argv[3])) < 1 || n_bots > 10)
+	{
+		printf("Bots number must be an integer in range [1,10]\n");
+		exit(-1);
+	}
+
 	// Open socket
 	int server_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
 	if (server_socket == -1)
@@ -334,7 +354,6 @@ int main()
 		perror("socket");
 		exit(-1);
 	}
-
 	// Bind address
 	struct sockaddr_un server_address;
 	server_address.sun_family = AF_UNIX;
@@ -356,22 +375,26 @@ int main()
 	noecho();
 
 	// Create the game window
-	WINDOW *game_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
+	game_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
 	box(game_win, 0, 0);
 	wrefresh(game_win);
 
 	// Create the message window
-	WINDOW *msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
 	// Store client information
 	struct sockaddr_un client_address;
 	socklen_t client_address_size;
-	
+
 	active_players = 0;					 // was not initialized, danger [A]
 	memset(players, 0, sizeof(players)); // was not initialized, caused seggs fault [A]
 	memset(bots, 0, sizeof(bots));		 // was not initialized
+
+	// Create thread for handling bots movement
+	pthread_t bots_thread;
+	pthread_create(&bots_thread, NULL, handle_bots, &n_bots);
 
 	while (1)
 	{
@@ -404,41 +427,8 @@ int main()
 		{
 		case (CONN):
 		{
-			// Is this still needed? [D]
-			
-			// Bots client connection
-			if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0 && bots[0].id != 0) // TODO: FIX
-			{
-				// Bots already connected
-				// This prevents bots client from connecting more than once
-				continue;
-			}
-			else if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0)
-			{
-				// Bots connection
-				handle_bots_connection(game_win, msg.field);
-				
-				msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
-				
-				// Send back CONN to notify success
-				msg.type = CONN;
-				break;
-			}
-
-			// Prizes client message
-			if (strcmp(client_address.sun_path, "/tmp/chase-socket-prizes") == 0)
-			{
-				create_prizes(game_win);
-				
-				msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
-				
-				// Send back CONN to notify success
-				msg.type = CONN;
-				break;
-			}
-
 			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
-			
+
 			// Player trying to connect
 			struct client_info *player = handle_player_connection(game_win, client_address);
 
@@ -466,13 +456,6 @@ int main()
 		}
 		case (DCONN):
 		{
-			// Bots disconnection
-			if (strcmp(client_address.sun_path, "/tmp/chase-socket-bots") == 0)
-			{
-				handle_bots_disconnection(game_win);
-				break;
-			}
-
 			// Player trying to disconnect
 			struct client_info *player = select_ball(msg.player_id);
 
@@ -490,7 +473,7 @@ int main()
 			// Ball can be a Bot or a Player
 			struct client_info *player = select_ball(msg.player_id);
 			direction_t dir = msg.dir;
-			
+
 			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
 
 			// Ball not found: do nothing
@@ -498,7 +481,7 @@ int main()
 			{
 				continue;
 			}
-			
+
 			// Ball HP is 0: disconnect player (only players lose health)
 			if (player->info.hp == 0)
 			{
@@ -509,21 +492,11 @@ int main()
 			{
 				handle_move(game_win, player, dir);
 
-				// Ball is a player: send field status message
-				if (player->id < BOTS_ID)
-				{
-					msg.type = FSTATUS;
-					field_status(msg.field);
-					update_stats(msg_win, msg.field);
-					msg.player_id = player->id;
-				}
-				
-				// Ball is a bot: send confirmation message
-				else
-				{
-					msg.type = BMOV;
-					msg.player_id = player->id;
-				}
+				// Send field status message
+				msg.type = FSTATUS;
+				field_status(msg.field);
+				update_stats(msg_win, msg.field);
+				msg.player_id = player->id;
 			}
 			break;
 		}
