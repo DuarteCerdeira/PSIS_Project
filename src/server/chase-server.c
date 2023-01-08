@@ -142,7 +142,6 @@ struct client_info *handle_player_connection(WINDOW *win, struct sockaddr_un cli
 
 	// Select a random character to assign to the player
 	char rand_char;
-	srand(time(NULL));
 	do
 	{
 		rand_char = rand() % ('Z' - 'A') + 'A';
@@ -269,36 +268,7 @@ void print_player_stats(WINDOW *win)
 	return;
 }
 
-void create_prizes(WINDOW *win)
-{
-	srand(time(NULL));
-	for (int i = 0; i < 5 && active_prizes < 10; i++, active_prizes++)
-	{
-		int x;
-		int y;
-
-		// Generate a random position that is not occupied
-		do
-		{
-			x = rand() % (WINDOW_SIZE - 2) + 1;
-			y = rand() % (WINDOW_SIZE - 2) + 1;
-		} while (board_grid[x][y] != 0);
-
-		// Generate a prize with a random value between 1 and 5
-		int value = rand() % 5 + 1;
-		prizes[active_prizes].info.pos_x = x;
-		prizes[active_prizes].info.pos_y = y;
-		prizes[active_prizes].info.ch = value + '0';
-		prizes[active_prizes].info.hp = value;
-		prizes[active_prizes].id = -(active_prizes + 1);
-
-		// Add prize to the board
-		board_grid[x][y] = prizes[active_prizes].id;
-		add_ball(win, &prizes[active_prizes].info);
-	}
-}
-
-// Thread function that handles bots movement
+// Thread function that handles bots
 void *handle_bots(void *arg)
 {
 	int n_bots = *(int *)arg;
@@ -332,8 +302,65 @@ void *handle_bots(void *arg)
 	}
 }
 
+// Thread function that handles the prizes
+void *handle_prizes(void *arg)
+{
+	// Create initial prizes
+	for (int i = 0; i < 5; i++)
+	{
+		int x;
+		int y;
+
+		// Generate a random position that is not occupied
+		do
+		{
+			x = rand() % (WINDOW_SIZE - 2) + 1;
+			y = rand() % (WINDOW_SIZE - 2) + 1;
+		} while (board_grid[x][y] != 0);
+
+		// Generate a prize with a random value between 1 and 5
+		int value = rand() % 5 + 1;
+		prizes[i].info.pos_x = x;
+		prizes[i].info.pos_y = y;
+		prizes[i].info.ch = value + '0';
+		prizes[i].info.hp = value;
+		prizes[i].id = -(i + 1);
+		active_prizes++;
+		add_ball(game_win, &prizes[i].info);
+	}
+
+	// Generate a new prize every 5 seconds
+	while (1)
+	{
+		sleep(5);
+		if (active_prizes == 10)
+			continue;
+		int x;
+		int y;
+
+		// Generate a random position that is not occupied
+		do
+		{
+			x = rand() % (WINDOW_SIZE - 2) + 1;
+			y = rand() % (WINDOW_SIZE - 2) + 1;
+		} while (board_grid[x][y] != 0);
+
+		// Generate a prize with a random value between 1 and 5
+		int value = rand() % 5 + 1;
+		prizes[active_prizes].info.pos_x = x;
+		prizes[active_prizes].info.pos_y = y;
+		prizes[active_prizes].info.ch = value + '0';
+		prizes[active_prizes].info.hp = value;
+		prizes[active_prizes].id = -(active_prizes + 1);
+		active_prizes++;
+		add_ball(game_win, &prizes[active_prizes - 1].info);
+		wrefresh(game_win);
+	}
+}
+
 int main(int argc, char *argv[])
 {
+	srand(time(NULL));
 	int n_bots = 0;
 	// Check arguments and its restrictions
 	if (argc != 4)
@@ -388,13 +415,18 @@ int main(int argc, char *argv[])
 	struct sockaddr_un client_address;
 	socklen_t client_address_size;
 
-	active_players = 0;					 // was not initialized, danger [A]
-	memset(players, 0, sizeof(players)); // was not initialized, caused seggs fault [A]
-	memset(bots, 0, sizeof(bots));		 // was not initialized
+	active_players = 0;
+	memset(players, 0, sizeof(players));
+	memset(bots, 0, sizeof(bots));
+	memset(prizes, 0, sizeof(prizes));
 
-	// Create thread for handling bots movement
+	// Create thread for handling bots
 	pthread_t bots_thread;
 	pthread_create(&bots_thread, NULL, handle_bots, &n_bots);
+
+	// Create thread to handle prizes
+	pthread_t prizes_thread;
+	pthread_create(&prizes_thread, NULL, handle_prizes, NULL);
 
 	while (1)
 	{

@@ -13,7 +13,6 @@ SERVER_PATH := ./src/server/chase-server.c
 # Board source code path
 BOARD_PATH := ./lib/board.c
 
-PRIZES_PATH := ./src/clients/chase-prizes.c
 # Executable extension
 EXT := .out
 
@@ -23,7 +22,7 @@ EXT := .out
 # - $^ is all dependencies
 
 # Default target
-all: client server prizes
+all: client server
 
 # Client executable
 client: chase-client.o board.o
@@ -33,10 +32,6 @@ client: chase-client.o board.o
 server: chase-server.o board.o
 	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-server$(EXT) $(LFLAGS)
 
-
-# Prizes executables
-prizes: chase-prizes.o board.o
-	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-prizes$(EXT) $(LFLAGS)
 
 # Board object files
 board.o: $(BOARD_PATH) $(HEADERS)
@@ -50,10 +45,6 @@ chase-client.o: $(CLIENT_PATH) $(HEADERS)
 chase-server.o: $(SERVER_PATH) $(HEADERS)
 	$(CC) $(CFLAGS) -c $(SERVER_PATH) -o ./obj/chase-server.o
 
-
-# Prizes object files
-chase-prizes.o: $(PRIZES_PATH) $(HEADERS)
-	$(CC) $(CFLAGS) -c $(PRIZES_PATH) -o ./obj/chase-prizes.o
 
 # Zip
 zip: ./src/$* ./Makefile ./bin
