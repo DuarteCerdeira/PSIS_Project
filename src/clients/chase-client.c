@@ -134,10 +134,25 @@ int main(int argc, char *argv[])
 	wrefresh(msg_win);
 
 	struct msg_data msg;
+	msg.type = CONN;
 
 	// Receive initial message from server
 	int nbytes = 0;
 	char buffer[sizeof(struct msg_data)] = {0};
+
+	// Send message to client
+	nbytes = 0;
+	memset(buffer, 0, sizeof(struct msg_data));
+
+	memcpy(buffer, &msg, sizeof(struct msg_data));
+		
+	do {
+		char *ptr = &buffer[nbytes];
+		nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+	} while (nbytes < sizeof(struct msg_data));
+
+	nbytes = 0;
+	memset(buffer, 0, sizeof(struct msg_data));
 
 	// This guarantees all the data is received using socket streams
 	do {
