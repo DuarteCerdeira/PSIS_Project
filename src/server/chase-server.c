@@ -5,7 +5,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-#include <pthread.h>
 
 /* Threads */
 #include <pthread.h>
@@ -23,8 +22,6 @@
 #define INIT_X WINDOW_SIZE / 2 // Initial x position
 #define INIT_Y WINDOW_SIZE / 2 // Initial y position
 
-#define SOCK_PORT 40000
-
 /* Client information structure */
 struct client_info
 {
@@ -39,7 +36,7 @@ struct client_info
 };
 
 /* Global variables */
-static char active_chars[MAX_PLAYERS];
+static char active_chars[10 + 10 + MAX_PLAYERS];
 static struct client_info balls[10 + 10 + MAX_PLAYERS];
 static int active_balls;
 
@@ -60,6 +57,34 @@ void field_status(ball_info_t *field)
 		field[i].pos_y = balls[i].info.pos_y;
 	}
 	return;
+}
+
+ball_info_t create_ball()
+{
+	ball_info_t new_ball;
+
+	// Select a random character to assign to the player
+	char rand_char;
+	srand(time(NULL));
+
+	/* == Critical Region == */
+	do
+	{
+		rand_char = rand() % ('Z' - 'A') + 'A';
+	} while (strchr(active_chars, rand_char) != NULL);
+
+	active_chars[active_balls] = rand_char;
+	/* ===================== */
+
+	// Save player information
+	new_ball.ch = rand_char;
+	new_ball.hp = MAX_HP;
+	new_ball.pos_x = INIT_X;
+	new_ball.pos_y = INIT_Y;
+
+	add_ball(game_win, &new_ball);
+
+	return new_ball;
 }
 
 void handle_move(int ball_id, direction_t dir)
@@ -223,7 +248,7 @@ void *handle_bots(void *arg)
 			board_grid[balls[index].info.pos_x][balls[index].info.pos_y] = index;
 		}
 		wrefresh(game_win);
-		sleep(1);
+		sleep(3);
 	}
 }
 
@@ -280,34 +305,7 @@ void *handle_prizes(void *arg)
 	}
 }
 
-ball_info_t create_ball()
-{
-	ball_info_t new_ball;
-
-	// Select a random character to assign to the player
-	char rand_char;
-	srand(time(NULL));
-
-	/* == Critical Region == */
-	do
-	{
-		rand_char = rand() % ('Z' - 'A') + 'A';
-	} while (strchr(active_chars, rand_char) != NULL);
-
-	active_chars[active_balls] = rand_char;
-	/* ===================== */
-
-	// Save player information
-	new_ball.ch = rand_char;
-	new_ball.hp = MAX_HP;
-	new_ball.pos_x = INIT_X;
-	new_ball.pos_y = INIT_Y;
-
-	add_ball(game_win, &new_ball);
-
-	return new_ball;
-}
-
+// Thread function that handles each client
 void *client_thread(void *arg)
 {
 	struct client_info client;
@@ -329,14 +327,17 @@ void *client_thread(void *arg)
 		{
 			char *ptr = &buffer[nbytes];
 			nbytes += recv(client.fd, ptr, sizeof(buffer) - nbytes, 0);
-		} while (nbytes < sizeof(struct msg_data));
+		} while (nbytes < sizeof(struct msg_data) && nbytes > 0);
+
+		if (nbytes == 0)
+			break;
 
 		memcpy(&msg, buffer, sizeof(buffer));
 
 		switch (msg.type)
 		{
 		case (CONN):
-			if (active_balls >= MAX_PLAYERS)
+			if (active_balls == (MAX_PLAYERS + 10 + 10 - 1))
 			{
 				close(client.fd);
 				client.fd = -1;
@@ -356,8 +357,6 @@ void *client_thread(void *arg)
 			msg.field[0] = client.info;
 
 			break;
-		case (DCONN):
-			break;
 		case (BMOV):
 			if (client.info.hp == 0)
 			{
@@ -370,7 +369,7 @@ void *client_thread(void *arg)
 
 			msg.type = FSTATUS;
 			field_status(msg.field);
-			// TODO: update stats
+			print_player_stats();
 			// TODO: send field status to everyone
 
 			break;
@@ -387,10 +386,28 @@ void *client_thread(void *arg)
 		do
 		{
 			char *ptr = &buffer[nbytes];
-			nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, 0);
+			nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
 		} while (nbytes < sizeof(struct msg_data));
 	}
 
+	// Delete the player
+	/* == Critical Region == */
+	delete_ball(game_win, &client.info);
+	board_grid[client.info.pos_x][client.info.pos_y] = -1;
+	/* ===================== */
+
+	// Delete the character from the list of used characters
+	// *strrchr(active_chars, client.info.ch) = active_chars[active_balls - 1];
+	// active_chars[active_balls - 1] = '\0';
+
+	// Delete player information
+	/* == Critical Region == */
+	client = balls[active_balls - 1];
+	memset(&balls[active_balls - 1], 0, sizeof(struct client_info));
+
+	active_balls--;
+	/* ===================== */
+	close(client.fd);
 	return NULL;
 }
 
@@ -398,10 +415,21 @@ int main(int argc, char *argv[])
 {
 	srand(time(NULL));
 	int n_bots = 0;
+	int sock_port = 0;
 	// Check arguments and its restrictions
 	if (argc != 4)
 	{
 		printf("Usage: %s <server_IP> <server_port> <number_of_bots [1,10]>", argv[0]);
+		exit(-1);
+	}
+	else if (inet_addr(argv[1]) == INADDR_NONE)
+	{
+		printf("Invalid IP address\n");
+		exit(-1);
+	}
+	else if ((sock_port = atoi(argv[2])) < 1024 || sock_port > 65535)
+	{
+		printf("Invalid server port\n");
 		exit(-1);
 	}
 	else if ((n_bots = atoi(argv[3])) < 1 || n_bots > 10)
@@ -414,26 +442,32 @@ int main(int argc, char *argv[])
 	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_socket == -1)
 	{
-		perror("socket");
+		perror("socket: ");
 		exit(-1);
 	}
 
 	// Bind address
 	struct sockaddr_in server_address;
 	server_address.sin_family = AF_INET;
-	server_address.sin_port = htons(SOCK_PORT);
-	server_address.sin_addr.s_addr = INADDR_ANY;
-
+	if ((server_address.sin_port = htons(sock_port)) == 0)
+	{
+		perror("htons port: ");
+		exit(-1);
+	}
+	if (inet_pton(AF_INET, argv[1], &server_address.sin_addr) <= 0)
+	{
+		perror("inet_pton: ");
+		exit(-1);
+	}
 	if (bind(server_socket, (struct sockaddr *)&server_address,
 			 sizeof(server_address)) == -1)
 	{
-		perror("bind");
+		perror("bind: ");
 		exit(-1);
 	}
-
 	if (listen(server_socket, 10) == -1)
 	{
-		perror("listen");
+		perror("listen: ");
 		exit(-1);
 	}
 
@@ -458,14 +492,9 @@ int main(int argc, char *argv[])
 
 	// Initialize global variables
 	active_balls = 0;
-	active_balls = 0;
 
 	memset(active_chars, 0, sizeof(active_chars));
-
 	memset(board_grid, -1, sizeof(board_grid));
-
-	memset(balls, 0, sizeof(balls));
-	memset(balls, 0, sizeof(balls));
 	memset(balls, 0, sizeof(balls));
 
 	// Create thread for handling bots
@@ -492,12 +521,6 @@ int main(int argc, char *argv[])
 		{
 			perror("accept");
 			exit(-1);
-		}
-
-		if (active_balls >= MAX_PLAYERS)
-		{
-			close(c_fd);
-			continue;
 		}
 
 		/* Create threads for each client */

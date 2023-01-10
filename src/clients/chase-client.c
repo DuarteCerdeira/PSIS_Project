@@ -9,6 +9,9 @@
 /* NCurses */
 #include <ncurses.h>
 
+/* Threads */
+#include <pthread.h>
+
 /* System libraries */
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -18,31 +21,26 @@
 
 /* Global variables */
 static int client_socket;
-// static struct sockaddr_in client_address;
+static WINDOW *game_win;
+static WINDOW *stats_win;
 static struct sockaddr_in server_address;
+pthread_mutex_t win_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 long client_id;
 
-void disconnect(int send_msg)
+void disconnect()
 {
 	// The argument is used to know if we want to send a message to the server
 	// In the HP0 case we don't, but we do in any other case
 	// Even in the CTRL + C case
-	if (send_msg)
-	{
-		// Send a DCONN message to the server
-		struct msg_data msg = {0};
-		msg.player_id = client_id;
-		msg.type = DCONN;
-		sendto(client_socket, &msg, sizeof(msg), 0, (struct sockaddr *)&server_address, sizeof(server_address));
-	}
+
 	close(client_socket);
 	endwin();
 	exit(0);
 }
 
 // Function to deal with CTRL + C as a normal disconnect
-void sigint_handler(int signum) { disconnect(true); }
+void sigint_handler(int signum) { disconnect(); }
 
 direction_t get_direction(int direction)
 {
@@ -66,21 +64,72 @@ direction_t get_direction(int direction)
 	}
 }
 
-void write_string(WINDOW *win, char *str)
+// Thread function to recieve field status msgs from server
+void *recv_field(void *arg)
 {
-	// Just a function to write a string into the msg window
-	werase(win);
-	box(win, 0, 0);
-	mvwprintw(win, 1, 1, "%s", str);
-	wrefresh(win);
+	int nbytes = 0;
+	char buffer[sizeof(struct msg_data)] = {0};
+
+	while (1)
+	{
+		// This guarantees all the data is received using socket streams
+		do
+		{
+			char *ptr = &buffer[nbytes];
+			nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+			if (nbytes == -1)
+			{
+				perror("recv: ");
+				exit(-1);
+			}
+		} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
+
+		if (nbytes <= 0)
+		{
+			disconnect();
+			exit(0);
+		}
+
+		struct msg_data msg;
+		memcpy(&msg, buffer, sizeof(struct msg_data));
+
+		if (msg.type == FSTATUS)
+		{
+			/* == Critical Region == */
+			pthread_mutex_lock(&win_mtx);
+			// Print the field
+			update_field(game_win, msg.field);
+			update_stats(stats_win, msg.field);
+			wrefresh(game_win);
+			wrefresh(stats_win);
+			pthread_mutex_unlock(&win_mtx);
+			/* ===================== */
+		}
+		else if (msg.type == HP0) // TODO: Continue Game stuff [A]
+		{
+			// If the player has 0 HP, disconnect
+			disconnect();
+		}
+	}
 }
 
 int main(int argc, char *argv[])
 {
-	// get server address
-	if (argc < 2)
+	int sock_port = 0;
+	// get server address and port from command line
+	if (argc < 3)
 	{
-		printf("Usage: %s <server_address>\n", argv[0]);
+		printf("Usage: %s <server_address> <server_port>\n", argv[0]);
+		exit(-1);
+	}
+	else if (inet_addr(argv[1]) == INADDR_NONE)
+	{
+		printf("Invalid server address\n");
+		exit(-1);
+	}
+	else if ((sock_port = atoi(argv[2])) < 1024 || sock_port > 65535)
+	{
+		printf("Invalid server port\n");
 		exit(-1);
 	}
 
@@ -88,7 +137,7 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sigint_handler);
 
 	client_id = (long)getpid();
-	
+
 	// open socket
 	client_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_socket == -1)
@@ -99,20 +148,20 @@ int main(int argc, char *argv[])
 
 	// No need to bind address with stream sockets
 
-	#define SOCK_PORT 40000
-	
 	// server address
 	server_address.sin_family = AF_INET;
-	server_address.sin_port = htons(SOCK_PORT);
-	if (inet_pton(AF_INET, argv[1], &server_address.sin_addr) < 1) {
+	server_address.sin_port = htons(sock_port);
+	if (inet_pton(AF_INET, argv[1], &server_address.sin_addr) < 1)
+	{
 		printf("Invalid network address\n");
 		exit(-1);
 	}
 
 	// Send connection request
-	if (connect(client_socket, (struct sockaddr *) &server_address,
-				sizeof(server_address)) == -1) {
-		perror("connect");
+	if (connect(client_socket, (struct sockaddr *)&server_address,
+				sizeof(server_address)) == -1)
+	{
+		perror("connect: ");
 		exit(-1);
 	}
 
@@ -123,15 +172,15 @@ int main(int argc, char *argv[])
 	keypad(stdscr, TRUE);
 
 	// Create the game window
-	WINDOW *game_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
+	game_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
 	box(game_win, 0, 0);
 	wrefresh(game_win);
 	keypad(game_win, TRUE);
 
 	// Create the message window
-	WINDOW *msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
-	box(msg_win, 0, 0);
-	wrefresh(msg_win);
+	stats_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	box(stats_win, 0, 0);
+	wrefresh(stats_win);
 
 	struct msg_data msg;
 	msg.type = CONN;
@@ -145,8 +194,9 @@ int main(int argc, char *argv[])
 	memset(buffer, 0, sizeof(struct msg_data));
 
 	memcpy(buffer, &msg, sizeof(struct msg_data));
-		
-	do {
+
+	do
+	{
 		char *ptr = &buffer[nbytes];
 		nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
 	} while (nbytes < sizeof(struct msg_data));
@@ -155,32 +205,66 @@ int main(int argc, char *argv[])
 	memset(buffer, 0, sizeof(struct msg_data));
 
 	// This guarantees all the data is received using socket streams
-	do {
+	do
+	{
 		char *ptr = &buffer[nbytes];
 		nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
-		if (nbytes == -1) {
-			perror("recv");
-			exit(-1);
+		if (nbytes == -1)
+		{
+			perror("recv: ");
+			disconnect();
 		}
 	} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
 
-	if (nbytes == 0) {
-		write_string(msg_win, "Rejected\n");
-		disconnect(false);
-		exit(-1);
-	}
+	if (nbytes == 0)
+		disconnect();
 
 	memcpy(&msg, buffer, sizeof(struct msg_data));
 
-	// create player
-	mvwaddch(game_win, msg.field[0].pos_y, msg.field[0].pos_x, msg.field[0].ch);
-	wrefresh(game_win);
+	if (msg.type == BINFO)
+	{
+		// create player
+		mvwaddch(game_win, msg.field[0].pos_y, msg.field[0].pos_x, msg.field[0].ch);
+		wrefresh(game_win);
+	}
+	else
+		disconnect();
 
-	sleep(20);
-	
-	write_string(msg_win, "Disconnected\nExiting...\n");
-	disconnect(true);
-	sleep(3);
+	// Create thread to receive field status messages
+	pthread_t recv_thread;
+	pthread_mutex_init(&win_mtx, NULL);
+	pthread_create(&recv_thread, NULL, recv_field, NULL);
 
-	exit(0);
+	int key = -1;
+
+	// Read key and send movement messages to server
+	while (1)
+	{
+		msg = (struct msg_data){0};
+		msg.type = BMOV;
+
+		// Read key input
+		key = wgetch(game_win);
+		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
+			msg.dir = get_direction(key);
+		else if (key == 27 || key == 'q')
+			break;
+		else
+			continue;
+
+		// Send movement message to server
+		nbytes = 0;
+		memset(buffer, 0, sizeof(struct msg_data));
+		memcpy(buffer, &msg, sizeof(struct msg_data));
+
+		/* == Critical Region == */
+		do
+		{
+			char *ptr = &buffer[nbytes];
+			nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+		} while (nbytes < sizeof(struct msg_data));
+		/* ===================== */
+	}
+
+	disconnect();
 }
