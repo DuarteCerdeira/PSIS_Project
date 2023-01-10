@@ -1,4 +1,5 @@
 /* Standard libraries */
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,15 +11,15 @@
 
 /* System libraries */
 #include <sys/socket.h>
-#include <sys/un.h>
+#include <arpa/inet.h>
 
 /* Local libraries */
 #include "../chase.h"
 
-// Needed these to be global to be able to use them in the disconnect function
+/* Global variables */
 static int client_socket;
-static struct sockaddr_un client_address;
-static struct sockaddr_un server_address;
+// static struct sockaddr_in client_address;
+static struct sockaddr_in server_address;
 
 long client_id;
 
@@ -36,16 +37,12 @@ void disconnect(int send_msg)
 		sendto(client_socket, &msg, sizeof(msg), 0, (struct sockaddr *)&server_address, sizeof(server_address));
 	}
 	close(client_socket);
-	unlink(client_address.sun_path);
 	endwin();
 	exit(0);
 }
 
 // Function to deal with CTRL + C as a normal disconnect
-void sigint_handler(int signum)
-{
-	disconnect(true);
-}
+void sigint_handler(int signum) { disconnect(true); }
 
 direction_t get_direction(int direction)
 {
@@ -91,169 +88,96 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sigint_handler);
 
 	client_id = (long)getpid();
+	
 	// open socket
-	client_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+	client_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (client_socket == -1)
 	{
 		perror("socket: ");
 		exit(-1);
 	}
 
-	// bind address
+	// No need to bind address with stream sockets
 
-	client_address.sun_family = AF_UNIX;
-	memset(client_address.sun_path, '\0', sizeof(client_address.sun_path));
-	sprintf(client_address.sun_path, "%s-%ld", SOCKET_PREFIX, client_id);
-
-	unlink(client_address.sun_path);
-
-	int err = bind(client_socket,
-				   (struct sockaddr *)&client_address,
-				   sizeof(client_address));
-	if (err == -1)
-	{
-		perror("bind: ");
-		exit(-1);
-	}
-
+	#define SOCK_PORT 40000
+	
 	// server address
-	server_address.sun_family = AF_UNIX;
-	memset(server_address.sun_path, '\0', sizeof(server_address.sun_path));
-	strcpy(server_address.sun_path, argv[1]);
-
-	// send connect message
-	struct msg_data connect_msg = {0};
-	connect_msg.type = CONN;
-	connect_msg.player_id = client_id;
-
-	int n_bytes = sendto(client_socket,
-						 &connect_msg,
-						 sizeof(connect_msg),
-						 0,
-						 (struct sockaddr *)&server_address,
-						 sizeof(server_address));
-	if (n_bytes == -1)
-	{
-		perror("connect sendto: ");
+	server_address.sin_family = AF_INET;
+	server_address.sin_port = htons(SOCK_PORT);
+	if (inet_pton(AF_INET, argv[1], &server_address.sin_addr) < 1) {
+		printf("Invalid network address\n");
 		exit(-1);
 	}
 
-	struct sockaddr_un recv_address;
-	socklen_t recv_address_len = sizeof(recv_address);
-	recv_address.sun_family = AF_UNIX;
-	memset(recv_address.sun_path, '\0', sizeof(recv_address.sun_path));
+	// Send connection request
+	if (connect(client_socket, (struct sockaddr *) &server_address,
+				sizeof(server_address)) == -1) {
+		perror("connect");
+		exit(-1);
+	}
 
+	// Ncurses initialization
 	initscr();
 	cbreak();
 	noecho();
 	keypad(stdscr, TRUE);
 
-	WINDOW *player_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
-	box(player_win, 0, 0);
-	wrefresh(player_win);
-	keypad(player_win, TRUE);
+	// Create the game window
+	WINDOW *game_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, 0);
+	box(game_win, 0, 0);
+	wrefresh(game_win);
+	keypad(game_win, TRUE);
 
-	// message window
+	// Create the message window
 	WINDOW *msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(msg_win, 0, 0);
 	wrefresh(msg_win);
 
-	while (1)
-	{
-		memset(&connect_msg, 0, sizeof(connect_msg));
-		// receive connect message
-		n_bytes = recvfrom(client_socket,
-						   &connect_msg,
-						   sizeof(connect_msg),
-						   0,
-						   (struct sockaddr *)&recv_address,
-						   &recv_address_len);
+	struct msg_data msg;
+	msg.type = CONN;
 
-		// checking that the message is from the server
-		if (n_bytes == -1)
-		{
-			perror("connect recvfrom: ");
+	// Receive initial message from server
+	int nbytes = 0;
+	char buffer[sizeof(struct msg_data)] = {0};
+
+	// Send message to client
+	nbytes = 0;
+	memset(buffer, 0, sizeof(struct msg_data));
+
+	memcpy(buffer, &msg, sizeof(struct msg_data));
+		
+	do {
+		char *ptr = &buffer[nbytes];
+		nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+	} while (nbytes < sizeof(struct msg_data));
+
+	nbytes = 0;
+	memset(buffer, 0, sizeof(struct msg_data));
+
+	// This guarantees all the data is received using socket streams
+	do {
+		char *ptr = &buffer[nbytes];
+		nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+		if (nbytes == -1) {
+			perror("recv");
 			exit(-1);
 		}
-		else if (strcmp(server_address.sun_path, recv_address.sun_path) != 0)
-			continue;
+	} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
 
-		// checking message type
-		if (connect_msg.type == RJCT)
-			exit(0);
-		else if (connect_msg.type == BINFO)
-			break;
+	if (nbytes == 0) {
+		write_string(msg_win, "Rejected\n");
+		disconnect(false);
+		exit(-1);
 	}
+
+	memcpy(&msg, buffer, sizeof(struct msg_data));
 
 	// create player
-	mvwaddch(player_win, connect_msg.field[0].pos_y, connect_msg.field[0].pos_x, connect_msg.field[0].ch);
-	wrefresh(player_win);
+	mvwaddch(game_win, msg.field[0].pos_y, msg.field[0].pos_x, msg.field[0].ch);
+	wrefresh(game_win);
 
-	int key = -1;
-	struct msg_data msg;
-
-	while (key != 27 && key != 'q')
-	{
-		// send move message
-		msg = (struct msg_data){0}; // clear message
-		msg.type = BMOV;
-		msg.player_id = client_id;
-
-		key = wgetch(player_win);
-		if (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT)
-			msg.dir = get_direction(key);
-		else if (key == 27 || key == 'q')
-			break;
-		else
-			continue;
-		n_bytes = sendto(client_socket,
-						 &msg,
-						 sizeof(msg),
-						 0,
-						 (struct sockaddr *)&server_address,
-						 sizeof(server_address));
-		if (n_bytes == -1)
-		{
-			perror("Ball move sendto: ");
-			exit(-1);
-		}
-
-		// receive field status
-		while (1)
-		{
-			n_bytes = recvfrom(client_socket,
-							   &msg,
-							   sizeof(msg),
-							   0,
-							   (struct sockaddr *)&recv_address,
-							   &recv_address_len);
-
-			// checking that the message is from the server
-			if (n_bytes == -1)
-			{
-				perror("Field status recvfrom: ");
-				exit(-1);
-			}
-			else if (strcmp(recv_address.sun_path, server_address.sun_path) != 0)
-				continue;
-			else if (msg.type == FSTATUS || msg.type == HP0)
-				break;
-		}
-
-		if (msg.type == HP0)
-		{
-			write_string(msg_win, "You died\nExiting...\n");
-			disconnect(false);
-		}
-		else if (msg.type == FSTATUS)
-		{
-			update_field(player_win, msg.field);
-			update_stats(msg_win, msg.field);
-			wrefresh(msg_win);
-			wrefresh(player_win);
-		}
-	}
-
+	sleep(20);
+	
 	write_string(msg_win, "Disconnected\nExiting...\n");
 	disconnect(true);
 	sleep(3);
