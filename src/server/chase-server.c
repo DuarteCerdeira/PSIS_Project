@@ -38,7 +38,7 @@ static char active_chars[MAX_PLAYERS];
 
 // Windows
 WINDOW *game_win = NULL;
-WINDOW *msg_win = NULL;
+WINDOW *stats_win = NULL;
 
 static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 
@@ -128,7 +128,7 @@ void field_status(ball_info_t *field)
 	return;
 }
 
-struct client_info *handle_player_connection(WINDOW *win, struct sockaddr_un client)
+struct client_info *handle_player_connection(struct sockaddr_un client)
 {
 	// Player limit reached
 	if (active_players >= MAX_PLAYERS)
@@ -158,15 +158,15 @@ struct client_info *handle_player_connection(WINDOW *win, struct sockaddr_un cli
 	// used characters
 	active_chars[active_players] = rand_char;
 
-	add_ball(win, &players[active_players].info);
+	add_ball(game_win, &players[active_players].info);
 
 	return &players[active_players++];
 }
 
-void handle_player_disconnection(WINDOW *win, struct client_info *player)
+void handle_player_disconnection(struct client_info *player)
 {
 	// Delete the ball from the board
-	delete_ball(win, &player->info);
+	delete_ball(game_win, &player->info);
 	board_grid[player->info.pos_x][player->info.pos_y] = 0;
 
 	// Delete the character from the list of used characters
@@ -180,7 +180,7 @@ void handle_player_disconnection(WINDOW *win, struct client_info *player)
 	active_players--;
 }
 
-void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
+void handle_move(struct client_info *ball, direction_t dir)
 {
 	struct client_info *ball_hit;
 
@@ -208,7 +208,7 @@ void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
 	{
 		// Ball position is updated
 		board_grid[ball->info.pos_x][ball->info.pos_y] = 0;
-		move_ball(win, &ball->info, dir);
+		move_ball(game_win, &ball->info, dir);
 		board_grid[ball->info.pos_x][ball->info.pos_y] = ball->id;
 		return;
 	}
@@ -246,11 +246,11 @@ void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
 	}
 
 	board_grid[ball->info.pos_x][ball->info.pos_y] = 0;
-	move_ball(win, &ball->info, new_dir);
+	move_ball(game_win, &ball->info, new_dir);
 	board_grid[ball->info.pos_x][ball->info.pos_y] = ball->id;
 }
 
-void print_player_stats(WINDOW *win)
+void print_player_stats()
 {
 	ball_info_t p_stats[MAX_PLAYERS] = {0};
 	for (size_t i = 0; i < MAX_PLAYERS; i++)
@@ -264,7 +264,7 @@ void print_player_stats(WINDOW *win)
 		p_stats[i].pos_y = players[i].info.pos_y;
 	}
 
-	update_stats(win, p_stats);
+	update_stats(stats_win, p_stats);
 	return;
 }
 
@@ -294,7 +294,7 @@ void *handle_bots(void *arg)
 
 			// Get a random direction
 			direction_t dir = random() % 4 + 1;
-			handle_move(game_win, &bots[i], dir);
+			handle_move(&bots[i], dir);
 			board_grid[bots[i].info.pos_x][bots[i].info.pos_y] = bots[i].id;
 		}
 		wrefresh(game_win);
@@ -407,9 +407,9 @@ int main(int argc, char *argv[])
 	wrefresh(game_win);
 
 	// Create the message window
-	msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
-	box(msg_win, 0, 0);
-	wrefresh(msg_win);
+	stats_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	box(stats_win, 0, 0);
+	wrefresh(stats_win);
 
 	// Store client information
 	struct sockaddr_un client_address;
@@ -451,7 +451,7 @@ int main(int argc, char *argv[])
 		{
 			long player_id = (long)atoi(strrchr(client_address.sun_path, '-') + 1);
 			struct client_info *player = select_ball(player_id);
-			handle_player_disconnection(game_win, player);
+			handle_player_disconnection(player);
 			continue;
 		}
 
@@ -462,7 +462,7 @@ int main(int argc, char *argv[])
 			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
 
 			// Player trying to connect
-			struct client_info *player = handle_player_connection(game_win, client_address);
+			struct client_info *player = handle_player_connection(client_address);
 
 			// Player limit reached: reject connection
 			if (player == NULL)
@@ -497,7 +497,7 @@ int main(int argc, char *argv[])
 				continue;
 			}
 
-			handle_player_disconnection(game_win, player);
+			handle_player_disconnection(player);
 			break;
 		}
 		case (BMOV):
@@ -518,16 +518,16 @@ int main(int argc, char *argv[])
 			if (player->info.hp == 0)
 			{
 				msg.type = HP0;
-				handle_player_disconnection(game_win, player);
+				handle_player_disconnection(player);
 			}
 			else
 			{
-				handle_move(game_win, player, dir);
+				handle_move(player, dir);
 
 				// Send field status message
 				msg.type = FSTATUS;
 				field_status(msg.field);
-				update_stats(msg_win, msg.field);
+				update_stats(stats_win, msg.field);
 				msg.player_id = player->id;
 			}
 			break;
@@ -543,9 +543,9 @@ int main(int argc, char *argv[])
 		memset(&msg, 0, sizeof(msg));
 
 		// Update message window
-		print_player_stats(msg_win);
+		print_player_stats();
 
-		wrefresh(msg_win);
+		wrefresh(stats_win);
 		wrefresh(game_win);
 	}
 	endwin();
