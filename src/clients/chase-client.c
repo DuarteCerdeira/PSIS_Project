@@ -180,7 +180,7 @@ int main(int argc, char *argv[])
 	keypad(game_win, TRUE);
 
 	// Create the message window
-	stats_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
+	stats_win = newwin(MAX_BALLS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
 	box(stats_win, 0, 0);
 	wrefresh(stats_win);
 
