@@ -37,7 +37,7 @@ struct client_info
 
 /* Global variables */
 
-static struct client_info balls[10 + 10 + MAX_PLAYERS];
+static struct client_info balls[MAX_PLAYERS];
 static pthread_mutex_t mux_balls;
 
 static int active_balls;
@@ -90,11 +90,13 @@ ball_info_t create_ball()
 	new_ball.ch = rand_char;
 	new_ball.hp = MAX_HP;
 	// Generate a random position that is not occupied
+	pthread_mutex_lock(&mux_board_grid);
 	do
 	{
 		new_ball.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
 		new_ball.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
 	} while (board_grid[new_ball.pos_x][new_ball.pos_y] != -1);
+	pthread_mutex_unlock(&mux_board_grid);
 
 	/* Critical Region */
 	pthread_mutex_lock(&mux_game_win);
@@ -403,55 +405,63 @@ void *client_thread(void *arg)
 		switch (msg.type)
 		{
 		case (CONN):
+			
+			client.info = create_ball();
+			client.type = PLAYER;
+
+			/* Critical Region */
+			pthread_mutex_lock(&mux_active_balls);
+			pthread_mutex_lock(&mux_balls);
+			
 			if (active_balls == (total_balls - 1))
 			{
 				close(client.fd);
 				client.fd = -1;
 				continue;
 			}
-			client.info = create_ball();
-			client.type = PLAYER;
-
-			/* == Critical Region == */
-			pthread_mutex_lock(&mux_active_balls);
-			pthread_mutex_lock(&mux_balls);
+			
 			index = active_balls;
 			balls[active_balls++] = client;
-			pthread_mutex_unlock(&mux_active_balls);
-			pthread_mutex_unlock(&mux_balls);
-			/* ===================== */
 
 			memset(&msg, 0, sizeof(struct msg_data));
+			
+			field_status(msg.field);
+			
+			pthread_mutex_unlock(&mux_active_balls);
+			pthread_mutex_unlock(&mux_balls);
+			/* =============== */
+
+			/* Critical Region */
+			add_ball(game_win, &client.info);
+			wrefresh(game_win);
+			/* =============== */
+			
 			msg.type = BINFO;
-			msg.field[0] = client.info;
+			// msg.field[0] = client.info;
 			break;
 
 		case (BMOV):
-			// We have to check in the balls array, the hp might be different from what the client last had
-			/* Critical Region */
-			if (balls[index].info.hp == 0)
-			{
-				msg.type = HP0;
-			}
-			/* =============== */
 
 			/* Critical Region */
 			pthread_mutex_lock(&mux_active_balls);
 			pthread_mutex_lock(&mux_board_grid);
 			pthread_mutex_lock(&mux_balls);
+			
 			handle_move(index, msg.dir);
+			wrefresh(game_win);
+
+			// Update the client info in this thread after the moves
+			client = balls[index];
+
+			memset(&msg, 0, sizeof(struct msg_data));
+			
+			msg.type = FSTATUS;
+			field_status(msg.field);
+			
 			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_board_grid);
 			pthread_mutex_unlock(&mux_balls);
-			// Update the client info in this thread after the moves
-			/* Critical Region */
-			client = balls[index];
-			/* =============== */
 
-			memset(&msg, 0, sizeof(struct msg_data));
-
-			msg.type = FSTATUS;
-			field_status(msg.field);
 			// TODO: send field status to everyone
 			break;
 
@@ -470,12 +480,12 @@ void *client_thread(void *arg)
 			nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
 		} while (nbytes < sizeof(struct msg_data));
 
-		wrefresh(game_win);
 	}
 
 	// Delete the player
 	pthread_mutex_lock(&mux_game_win);
 	delete_ball(game_win, &client.info);
+	wrefresh(game_win);
 	pthread_mutex_unlock(&mux_game_win);
 	
 	/* == Critical Region == */

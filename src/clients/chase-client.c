@@ -226,8 +226,13 @@ int main(int argc, char *argv[])
 	if (msg.type == BINFO)
 	{
 		// create player
-		mvwaddch(game_win, msg.field[0].pos_y, msg.field[0].pos_x, msg.field[0].ch);
+		/* mvwaddch(game_win, msg.field[0].pos_y, msg.field[0].pos_x, msg.field[0].ch); */
+		/* wrefresh(game_win); */
+
+		update_field(game_win, msg.field);
+		update_stats(stats_win, msg.field);
 		wrefresh(game_win);
+		wrefresh(stats_win);
 	}
 	else
 		disconnect();
