@@ -36,8 +36,8 @@ struct client_info
 };
 
 /* Global variables */
-static char active_chars[10 + 10 + MAX_PLAYERS];
-static struct client_info balls[10 + 10 + MAX_PLAYERS];
+static char active_chars[MAX_PLAYERS];
+static struct client_info balls[MAX_PLAYERS];
 static int active_balls;
 
 // Windows
@@ -48,14 +48,22 @@ static char board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 
 void field_status(ball_info_t *field)
 {
-	// Fills out players information
+	struct client_info balls_copy[MAX_PLAYERS];
+	/* Critical Region */
+	memcpy(balls_copy, balls, sizeof(balls));
+	/* =============== */
+
+	// Fills out player information
 	for (int i = 0; i < active_balls; i++)
 	{
-		field[i].ch = balls[i].info.ch;
-		field[i].hp = balls[i].info.hp;
-		field[i].pos_x = balls[i].info.pos_x;
-		field[i].pos_y = balls[i].info.pos_y;
+		field[i].ch = balls_copy[i].info.ch;
+		field[i].hp = balls_copy[i].info.hp;
+		field[i].pos_x = balls_copy[i].info.pos_x;
+		field[i].pos_y = balls_copy[i].info.pos_y;
 	}
+
+	update_stats(stats_win, field);
+
 	return;
 }
 
@@ -79,8 +87,12 @@ ball_info_t create_ball()
 	// Save player information
 	new_ball.ch = rand_char;
 	new_ball.hp = MAX_HP;
-	new_ball.pos_x = INIT_X;
-	new_ball.pos_y = INIT_Y;
+	// Generate a random position that is not occupied
+	do
+	{
+		new_ball.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		new_ball.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
+	} while (board_grid[new_ball.pos_x][new_ball.pos_y] != -1);
 
 	add_ball(game_win, &new_ball);
 
@@ -96,28 +108,28 @@ void handle_move(int ball_id, direction_t dir)
 	switch (dir)
 	{
 	case UP:
-		if (ball.info.pos_y <= 1)
+		if (ball.info.pos_y < 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y - 1];
 		break;
 	case DOWN:
-		if (ball.info.pos_y >= WINDOW_SIZE - 1)
+		if (ball.info.pos_y > WINDOW_SIZE - 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y + 1];
 		break;
 	case LEFT:
-		if (ball.info.pos_x <= 1)
+		if (ball.info.pos_x < 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x - 1][ball.info.pos_y];
 		break;
 	case RIGHT:
-		if (ball.info.pos_x >= WINDOW_SIZE - 1)
+		if (ball.info.pos_x > WINDOW_SIZE - 1)
 		{
 			return;
 		}
@@ -155,6 +167,7 @@ void handle_move(int ball_id, direction_t dir)
 		ball.info.hp += (ball.info.hp + health > MAX_HP) ? MAX_HP - ball.info.hp : health;
 
 		// Prize is deleted
+		delete_ball(game_win, &ball_hit.info);
 
 		/* Critical Region */
 		struct client_info last_ball = balls[active_balls - 1];
@@ -186,29 +199,6 @@ void handle_move(int ball_id, direction_t dir)
 	board_grid[ball.info.pos_x][ball.info.pos_y] = ball_id;
 	memcpy(&balls[ball_id], &ball, sizeof(struct client_info));
 	/* =============== */
-}
-
-void print_player_stats()
-{
-	struct client_info balls_copy[10 + 10 + MAX_PLAYERS];
-	/* Critical Region */
-	memcpy(balls_copy, balls, sizeof(balls));
-	/* =============== */
-
-	ball_info_t p_stats[MAX_PLAYERS] = {0};
-	for (size_t i = 0; i < active_balls; i++)
-	{
-		if (balls_copy[i].type != PLAYER)
-			continue;
-
-		p_stats[i].ch = balls_copy[i].info.ch;
-		p_stats[i].hp = balls_copy[i].info.hp;
-		p_stats[i].pos_x = balls_copy[i].info.pos_x;
-		p_stats[i].pos_y = balls_copy[i].info.pos_y;
-	}
-
-	update_stats(stats_win, p_stats);
-	return;
 }
 
 // Thread function that handles bots
@@ -310,18 +300,20 @@ void *client_thread(void *arg)
 {
 	struct client_info client;
 	int index;
+	int nbytes = 0;
+	struct msg_data msg;
+	char buffer[sizeof(struct msg_data)];
+	int total_balls = sizeof(balls) / sizeof(balls[0]);
 
 	client.fd = *(int *)arg;
 
 	while (client.fd != -1)
 	{
-		struct msg_data msg = {0};
-		int nbytes;
-		char buffer[sizeof(struct msg_data)];
+		msg = (struct msg_data){0};
+		nbytes = 0;
 
 		// Receive message from client
-		nbytes = 0;
-		memset(buffer, 0, sizeof(struct msg_data));
+		memset(buffer, 0, sizeof(buffer));
 
 		do
 		{
@@ -337,7 +329,7 @@ void *client_thread(void *arg)
 		switch (msg.type)
 		{
 		case (CONN):
-			if (active_balls == (MAX_PLAYERS + 10 + 10 - 1))
+			if (active_balls == (total_balls - 1))
 			{
 				close(client.fd);
 				client.fd = -1;
@@ -352,27 +344,32 @@ void *client_thread(void *arg)
 			/* ===================== */
 
 			memset(&msg, 0, sizeof(struct msg_data));
-
 			msg.type = BINFO;
 			msg.field[0] = client.info;
-
 			break;
+
 		case (BMOV):
-			if (client.info.hp == 0)
+			// We have to check in the balls array, the hp might be different from what the client last had
+			/* Critical Region */
+			if (balls[index].info.hp == 0)
 			{
 				msg.type = HP0;
 			}
+			/* =============== */
 
 			handle_move(index, msg.dir);
+			// Update the client info in this thread after the moves
+			/* Critical Region */
+			client = balls[index];
+			/* =============== */
 
 			memset(&msg, 0, sizeof(struct msg_data));
 
 			msg.type = FSTATUS;
 			field_status(msg.field);
-			print_player_stats();
 			// TODO: send field status to everyone
-
 			break;
+
 		default:
 			continue;
 		}
@@ -380,7 +377,6 @@ void *client_thread(void *arg)
 		// Send message to client
 		nbytes = 0;
 		memset(buffer, 0, sizeof(struct msg_data));
-
 		memcpy(buffer, &msg, sizeof(struct msg_data));
 
 		do
@@ -390,8 +386,8 @@ void *client_thread(void *arg)
 		} while (nbytes < sizeof(struct msg_data));
 	}
 
-	// Delete the player
 	/* == Critical Region == */
+	// Delete the player
 	delete_ball(game_win, &client.info);
 	board_grid[client.info.pos_x][client.info.pos_y] = -1;
 	/* ===================== */
@@ -400,8 +396,8 @@ void *client_thread(void *arg)
 	// *strrchr(active_chars, client.info.ch) = active_chars[active_balls - 1];
 	// active_chars[active_balls - 1] = '\0';
 
-	// Delete player information
 	/* == Critical Region == */
+	// Delete player information
 	client = balls[active_balls - 1];
 	memset(&balls[active_balls - 1], 0, sizeof(struct client_info));
 
