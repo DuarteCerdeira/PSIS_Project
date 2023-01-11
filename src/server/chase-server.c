@@ -432,8 +432,10 @@ void *client_thread(void *arg)
 			/* =============== */
 
 			/* Critical Region */
+			pthread_mutex_lock(&mux_game_win);
 			add_ball(game_win, &client.info);
 			wrefresh(game_win);
+			pthread_mutex_unlock(&mux_game_win);
 			/* =============== */
 			
 			msg.type = BINFO;
