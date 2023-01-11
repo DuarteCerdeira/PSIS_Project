@@ -57,14 +57,22 @@ static pthread_mutex_t mux_board_grid;
 
 void field_status(ball_info_t *field)
 {
-	// Fills out players information
+	struct client_info balls_copy[MAX_PLAYERS];
+	/* Critical Region */
+	memcpy(balls_copy, balls, sizeof(balls));
+	/* =============== */
+
+	// Fills out player information
 	for (int i = 0; i < active_balls; i++)
 	{
-		field[i].ch = balls[i].info.ch;
-		field[i].hp = balls[i].info.hp;
-		field[i].pos_x = balls[i].info.pos_x;
-		field[i].pos_y = balls[i].info.pos_y;
+		field[i].ch = balls_copy[i].info.ch;
+		field[i].hp = balls_copy[i].info.hp;
+		field[i].pos_x = balls_copy[i].info.pos_x;
+		field[i].pos_y = balls_copy[i].info.pos_y;
 	}
+
+	update_stats(stats_win, field);
+
 	return;
 }
 
@@ -81,8 +89,12 @@ ball_info_t create_ball()
 	// Save player information
 	new_ball.ch = rand_char;
 	new_ball.hp = MAX_HP;
-	new_ball.pos_x = INIT_X;
-	new_ball.pos_y = INIT_Y;
+	// Generate a random position that is not occupied
+	do
+	{
+		new_ball.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		new_ball.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
+	} while (board_grid[new_ball.pos_x][new_ball.pos_y] != -1);
 
 	/* Critical Region */
 	pthread_mutex_lock(&mux_game_win);
@@ -102,28 +114,28 @@ void handle_move(int ball_id, direction_t dir)
 	switch (dir)
 	{
 	case UP:
-		if (ball.info.pos_y <= 1)
+		if (ball.info.pos_y < 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y - 1];
 		break;
 	case DOWN:
-		if (ball.info.pos_y >= WINDOW_SIZE - 1)
+		if (ball.info.pos_y > WINDOW_SIZE - 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y + 1];
 		break;
 	case LEFT:
-		if (ball.info.pos_x <= 1)
+		if (ball.info.pos_x < 1)
 		{
 			return;
 		}
 		ball_hit_id = board_grid[ball.info.pos_x - 1][ball.info.pos_y];
 		break;
 	case RIGHT:
-		if (ball.info.pos_x >= WINDOW_SIZE - 1)
+		if (ball.info.pos_x > WINDOW_SIZE - 1)
 		{
 			return;
 		}
@@ -362,18 +374,20 @@ void *client_thread(void *arg)
 {
 	struct client_info client;
 	int index;
+	int nbytes = 0;
+	struct msg_data msg;
+	char buffer[sizeof(struct msg_data)];
+	int total_balls = sizeof(balls) / sizeof(balls[0]);
 
 	client.fd = *(int *)arg;
 
 	while (client.fd != -1)
 	{
-		struct msg_data msg = {0};
-		int nbytes;
-		char buffer[sizeof(struct msg_data)];
+		msg = (struct msg_data){0};
+		nbytes = 0;
 
 		// Receive message from client
-		nbytes = 0;
-		memset(buffer, 0, sizeof(struct msg_data));
+		memset(buffer, 0, sizeof(buffer));
 
 		do
 		{
@@ -389,7 +403,7 @@ void *client_thread(void *arg)
 		switch (msg.type)
 		{
 		case (CONN):
-			if (active_balls == (MAX_PLAYERS + 10 + 10 - 1))
+			if (active_balls == (total_balls - 1))
 			{
 				close(client.fd);
 				client.fd = -1;
@@ -408,16 +422,18 @@ void *client_thread(void *arg)
 			/* ===================== */
 
 			memset(&msg, 0, sizeof(struct msg_data));
-
 			msg.type = BINFO;
 			msg.field[0] = client.info;
-
 			break;
+
 		case (BMOV):
-			if (client.info.hp == 0)
+			// We have to check in the balls array, the hp might be different from what the client last had
+			/* Critical Region */
+			if (balls[index].info.hp == 0)
 			{
 				msg.type = HP0;
 			}
+			/* =============== */
 
 			/* Critical Region */
 			pthread_mutex_lock(&mux_active_balls);
@@ -427,16 +443,18 @@ void *client_thread(void *arg)
 			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_board_grid);
 			pthread_mutex_unlock(&mux_balls);
+			// Update the client info in this thread after the moves
+			/* Critical Region */
+			client = balls[index];
 			/* =============== */
 
 			memset(&msg, 0, sizeof(struct msg_data));
 
 			msg.type = FSTATUS;
 			field_status(msg.field);
-			print_player_stats();
 			// TODO: send field status to everyone
-
 			break;
+
 		default:
 			continue;
 		}
@@ -444,7 +462,6 @@ void *client_thread(void *arg)
 		// Send message to client
 		nbytes = 0;
 		memset(buffer, 0, sizeof(struct msg_data));
-
 		memcpy(buffer, &msg, sizeof(struct msg_data));
 
 		do

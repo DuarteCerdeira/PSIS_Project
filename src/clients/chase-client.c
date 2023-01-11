@@ -69,9 +69,13 @@ void *recv_field(void *arg)
 {
 	int nbytes = 0;
 	char buffer[sizeof(struct msg_data)] = {0};
+	struct msg_data msg;
 
 	while (1)
 	{
+		nbytes = 0;
+		msg = (struct msg_data){0};
+		memset(buffer, 0, sizeof(buffer));
 		// This guarantees all the data is received using socket streams
 		do
 		{
@@ -87,10 +91,8 @@ void *recv_field(void *arg)
 		if (nbytes <= 0)
 		{
 			disconnect();
-			exit(0);
 		}
 
-		struct msg_data msg;
 		memcpy(&msg, buffer, sizeof(struct msg_data));
 
 		if (msg.type == FSTATUS)
@@ -256,14 +258,11 @@ int main(int argc, char *argv[])
 		nbytes = 0;
 		memset(buffer, 0, sizeof(struct msg_data));
 		memcpy(buffer, &msg, sizeof(struct msg_data));
-
-		/* == Critical Region == */
 		do
 		{
 			char *ptr = &buffer[nbytes];
 			nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
 		} while (nbytes < sizeof(struct msg_data));
-		/* ===================== */
 	}
 
 	disconnect();
