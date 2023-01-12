@@ -1,6 +1,6 @@
 #include <ncurses.h>
 
-#define WINDOW_SIZE 20		   // Window size
+#define WINDOW_SIZE 30		   // Window size
 
 // Direction
 typedef enum direction
