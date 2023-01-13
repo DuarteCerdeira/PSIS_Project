@@ -39,10 +39,8 @@ struct client_info
 
 // Each global variable has a corresponding mutex
 static struct client_info balls[MAX_BALLS];
-static pthread_mutex_t mux_balls;
-
 static int active_balls;
-static pthread_mutex_t mux_active_balls;
+static pthread_mutex_t mux_balls;
 
 static int n_prizes;
 static pthread_mutex_t mux_n_prizes;
@@ -241,7 +239,6 @@ void *handle_bots(void *arg)
 		int y;
 		
 		/* Critical Region */
-		pthread_mutex_lock(&mux_active_balls);
 		pthread_mutex_lock(&mux_board_grid);
 		pthread_mutex_lock(&mux_balls);
 		do
@@ -264,7 +261,6 @@ void *handle_bots(void *arg)
 
 		pthread_mutex_unlock(&mux_balls);
 		pthread_mutex_unlock(&mux_board_grid);
-		pthread_mutex_unlock(&mux_active_balls);
 		/* =============== */
 
 		pthread_mutex_lock(&mux_game_win);
@@ -282,14 +278,12 @@ void *handle_bots(void *arg)
 			direction_t dir = random() % 4 + 1;
 			/* Critical Region */
 			pthread_mutex_lock(&mux_board_grid);
-			pthread_mutex_lock(&mux_active_balls);
 			pthread_mutex_lock(&mux_balls);
 			pthread_mutex_lock(&mux_game_win);
 			handle_move(index, dir);
 			wrefresh(game_win);
 			pthread_mutex_unlock(&mux_game_win);
 			pthread_mutex_unlock(&mux_balls);
-			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_board_grid);
 			/* =============== */
 		}
@@ -318,7 +312,6 @@ void *handle_prizes(void *arg)
 		}
 
 		/* Critical Region */
-		pthread_mutex_lock(&mux_active_balls);
 		pthread_mutex_lock(&mux_board_grid);
 		pthread_mutex_lock(&mux_balls);
 
@@ -328,7 +321,6 @@ void *handle_prizes(void *arg)
 		{
 			pthread_mutex_unlock(&mux_balls);
 			pthread_mutex_unlock(&mux_board_grid);
-			pthread_mutex_unlock(&mux_active_balls);
 			continue;
 		}
 		
@@ -359,7 +351,6 @@ void *handle_prizes(void *arg)
 
 		pthread_mutex_unlock(&mux_balls);
 		pthread_mutex_unlock(&mux_board_grid);
-		pthread_mutex_unlock(&mux_active_balls);
 		/* =============== */
 
 		pthread_mutex_lock(&mux_n_prizes);
@@ -410,7 +401,6 @@ void *client_thread(void *arg)
 		case (CONN):
 			
 			/* Critical Region */
-			pthread_mutex_lock(&mux_active_balls);
 			pthread_mutex_lock(&mux_balls);
 			pthread_mutex_lock(&mux_board_grid);
 
@@ -425,7 +415,6 @@ void *client_thread(void *arg)
 				client.fd = -1;
 				
 				pthread_mutex_unlock(&mux_board_grid);
-				pthread_mutex_unlock(&mux_active_balls);
 				pthread_mutex_unlock(&mux_balls);
 				continue;
 			}
@@ -438,7 +427,6 @@ void *client_thread(void *arg)
 			board_grid[client.info.pos_x][client.info.pos_y] = index;
 
 			pthread_mutex_unlock(&mux_board_grid);
-			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_balls);
 			/* =============== */
 
@@ -474,7 +462,6 @@ void *client_thread(void *arg)
 		case (BMOV):
 
 			/* Critical Region */
-			pthread_mutex_lock(&mux_active_balls);
 			pthread_mutex_lock(&mux_board_grid);
 			pthread_mutex_lock(&mux_balls);
 			pthread_mutex_lock(&mux_game_win);
@@ -486,7 +473,6 @@ void *client_thread(void *arg)
 			client = balls[index];
 			
 			pthread_mutex_unlock(&mux_game_win);
-			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_board_grid);
 			pthread_mutex_unlock(&mux_balls);
 
@@ -514,14 +500,12 @@ void *client_thread(void *arg)
 	// Delete player information
 	/* == Critical Region == */
 	pthread_mutex_lock(&mux_balls);
-	pthread_mutex_lock(&mux_active_balls);
 	
 	balls[index] = balls[active_balls - 1];
 	memset(&balls[active_balls - 1], 0, sizeof(struct client_info));
 	active_balls--;
 	
 	pthread_mutex_unlock(&mux_balls);
-	pthread_mutex_unlock(&mux_active_balls);
 	/* ===================== */
 	close(client.fd);
 	
