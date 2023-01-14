@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
 
 /* Threads */
 #include <pthread.h>
@@ -20,8 +21,8 @@
 /* Local libraries */
 #include "../chase.h"
 
-#define INIT_X WINDOW_SIZE / 2 // Initial x position
-#define INIT_Y WINDOW_SIZE / 2 // Initial y position
+// Error handling function
+extern int errno;
 
 /* Client information structure */
 struct client_info
@@ -29,6 +30,7 @@ struct client_info
 	int fd;
 	enum client_type
 	{
+		EMPTY,
 		PLAYER,
 		BOT,
 		PRIZE
@@ -62,18 +64,17 @@ static pthread_mutex_t mux_board_grid;
 
 void field_status(ball_info_t *field)
 {
-	struct client_info balls_copy[MAX_BALLS];
-	memcpy(balls_copy, balls, sizeof(balls));
-	int act = active_balls;
-	/* =============== */
-
 	// Fills out player information
-	for (int i = 0; i < act; i++)
+	int f_index = 0;
+	for (int i = 0; i < MAX_BALLS; i++)
 	{
-		field[i].ch = balls_copy[i].info.ch;
-		field[i].hp = balls_copy[i].info.hp;
-		field[i].pos_x = balls_copy[i].info.pos_x;
-		field[i].pos_y = balls_copy[i].info.pos_y;
+		if (balls[i].type == EMPTY)
+			continue;
+		field[f_index].ch = balls[i].info.ch;
+		field[f_index].hp = balls[i].info.hp;
+		field[f_index].pos_x = balls[i].info.pos_x;
+		field[f_index].pos_y = balls[i].info.pos_y;
+		f_index++;
 	}
 
 	pthread_mutex_lock(&mux_stats_win);
@@ -166,19 +167,14 @@ void handle_move(int ball_id, direction_t dir)
 	direction_t new_dir = NONE;
 
 	// Player hit a prize
-	if (ball_hit.type == PRIZE && ball.type != BOT)
+	if (ball_hit.type == PRIZE && ball.type == PLAYER)
 	{
 		// Player's health is updated
 		int health = ball_hit.info.hp;
 		ball.info.hp += (ball.info.hp + health > MAX_HP) ? MAX_HP - ball.info.hp : health;
-
 		// Prize is deleted
-		struct client_info last_ball = balls[active_balls - 1];
-
-		board_grid[last_ball.info.pos_x][last_ball.info.pos_y] = ball_hit_id;
-		ball_hit = last_ball;
-
-		memset(&balls[active_balls - 1], 0, sizeof(struct client_info));
+		delete_ball(game_win, &ball_hit.info);
+		ball_hit = (struct client_info){0};
 
 		pthread_mutex_lock(&mux_n_prizes);
 		n_prizes--;
@@ -191,7 +187,7 @@ void handle_move(int ball_id, direction_t dir)
 	}
 
 	// Ball (player or bot) hit a player
-	else if (ball_hit.type != BOT)
+	else if (ball_hit.type == PLAYER)
 	{
 		// Ball "steals" 1 HP from the player
 		ball.info.hp == MAX_HP ? MAX_HP : ball.info.hp++;
@@ -236,6 +232,8 @@ void *handle_bots(void *arg)
 		new_bot.info.pos_x = x;
 		new_bot.info.pos_y = y;
 
+		// We don't have to look for a free space in the data struct
+		// as the bots are the first balls to be created
 		memcpy(&balls[active_balls], &new_bot, sizeof(new_bot));
 		bot_index[i] = active_balls;
 		board_grid[new_bot.info.pos_x][new_bot.info.pos_y] = active_balls;
@@ -330,9 +328,12 @@ void *handle_prizes(void *arg)
 		new_prize.info.hp = value;
 		new_prize.type = PRIZE;
 
-		memcpy(&balls[active_balls], &new_prize, sizeof(struct client_info));
+		int free_index = 0;
+		while (free_index < MAX_BALLS && balls[free_index].type != EMPTY)
+			free_index++;
+		memcpy(&balls[free_index], &new_prize, sizeof(struct client_info));
 
-		board_grid[x][y] = active_balls;
+		board_grid[x][y] = free_index;
 
 		active_balls++;
 
@@ -354,14 +355,34 @@ void *handle_prizes(void *arg)
 	}
 }
 
+// Thread function to wait 10s for a dead player's continue game
+void *respawn_timer(void *arg)
+{
+	// This thread will be killed if the client sends a msg
+	int index = *(int *)arg;
+	sleep(10);
+	// If not, just disconnect the client
+	pthread_mutex_lock(&mux_balls);
+	pthread_mutex_lock(&mux_active_balls);
+	// Make sure we signal that this player "doesn't exist" anymore
+	// So that fstatus stops being sent to it after closing its FD
+	close(balls[index].fd);
+	balls[index].type = EMPTY;
+	pthread_mutex_unlock(&mux_active_balls);
+	pthread_mutex_unlock(&mux_balls);
+
+	return NULL;
+}
+
 // Thread function that handles each client
 void *client_thread(void *arg)
 {
-	struct client_info client;
-	int index;
+	struct client_info client = {0};
+	int index = 0;
 	int nbytes = 0;
 	struct msg_data msg;
 	char buffer[sizeof(struct msg_data)];
+	pthread_t respawn_thread; // Respawn timer thread variable in case we need it
 
 	client.fd = *(int *)arg;
 
@@ -371,14 +392,12 @@ void *client_thread(void *arg)
 		msg = (struct msg_data){0};
 		memset(buffer, 0, sizeof(buffer));
 
-		// Receive message from client
+		// Check if the client sent any message after dying (to reconnect)
 		if (client.info.ch != 0 && client.info.hp == 0)
-		{
-			sleep(10);
-			ioctl(client.fd, FIONREAD, &nbytes);
-			if (nbytes == 0)
-				break;
-		}
+			// Create thread to countdown the respawn time
+			pthread_create(&respawn_thread, NULL, respawn_timer, &index);
+
+		// Receive message from client
 		do
 		{
 			nbytes = 0;
@@ -386,8 +405,13 @@ void *client_thread(void *arg)
 			nbytes += recv(client.fd, ptr, sizeof(buffer) - nbytes, 0);
 		} while (nbytes < sizeof(struct msg_data) && nbytes > 0);
 
-		if (nbytes == 0)
+		// Socket was closed, either by the client or by the respawn timeout
+		if (nbytes <= 0)
 			break;
+
+		// Stop the respawn timer thread if the client sent a message
+		if (client.info.ch != 0 && client.info.hp == 0)
+			pthread_cancel(respawn_thread);
 
 		memcpy(&msg, buffer, sizeof(buffer));
 
@@ -416,11 +440,13 @@ void *client_thread(void *arg)
 				continue;
 			}
 
-			// Save the position of the player
-			index = active_balls;
+			// Find a free spot and save the position of the player
+			index = 0;
+			while (index < MAX_BALLS && balls[index].type != EMPTY)
+				index++;
 
 			// Update balls structure and game board with new player
-			balls[active_balls++] = client;
+			balls[index] = client;
 			board_grid[client.info.pos_x][client.info.pos_y] = index;
 
 			pthread_mutex_unlock(&mux_board_grid);
@@ -466,7 +492,7 @@ void *client_thread(void *arg)
 
 			if (balls[index].info.hp == 0)
 			{
-				client = balls[index];
+				// Player is dead
 				memset(&msg, 0, sizeof(struct msg_data));
 				msg.type = HP0;
 
@@ -491,18 +517,18 @@ void *client_thread(void *arg)
 				handle_move(index, msg.dir);
 				wrefresh(game_win);
 
-				// Update the client info in this thread after the move
-				client = balls[index];
-
 				pthread_mutex_unlock(&mux_game_win);
 			}
 
+			// Update the client info in this thread after the move
+			client = balls[index];
 			pthread_mutex_unlock(&mux_active_balls);
 			pthread_mutex_unlock(&mux_board_grid);
 			pthread_mutex_unlock(&mux_balls);
 
 			break;
 		case (CONTGAME):
+			// Revive the player
 			pthread_mutex_lock(&mux_balls);
 			pthread_mutex_lock(&mux_active_balls);
 
@@ -538,8 +564,7 @@ void *client_thread(void *arg)
 	pthread_mutex_lock(&mux_balls);
 	pthread_mutex_lock(&mux_active_balls);
 
-	balls[index] = balls[active_balls - 1];
-	memset(&balls[active_balls - 1], 0, sizeof(struct client_info));
+	memset(&balls[index], 0, sizeof(struct client_info));
 	active_balls--;
 
 	pthread_mutex_unlock(&mux_balls);
@@ -552,6 +577,7 @@ void *client_thread(void *arg)
 	return NULL;
 }
 
+// Thread function to broadcast the field status to all clients
 void *field_update(void *arg)
 {
 	while (1)
@@ -566,10 +592,10 @@ void *field_update(void *arg)
 
 		for (int i = 0; i < MAX_BALLS; i++)
 		{
+			// Send to (active) clients only
 			if (balls[i].type != PLAYER)
-			{
 				continue;
-			}
+
 			// Send message to client
 			int nbytes = 0;
 			char buffer[sizeof(struct msg_data)] = {0};
@@ -692,14 +718,14 @@ int main(int argc, char *argv[])
 		memset(&client_address, 0, sizeof(client_address));
 		client_address_size = sizeof(struct sockaddr_in);
 
-		int c_fd = accept(server_socket, (struct sockaddr *)&client_address,
-						  &client_address_size);
+		int c_fd = -1;
 
-		if (c_fd == -1)
+		// This loop is to handle the case when the accept() call is interrupted by a signal
+		// Which seems to be very frequent
+		do
 		{
-			perror("accept");
-			exit(-1);
-		}
+			c_fd = accept(server_socket, (struct sockaddr *)&client_address, &client_address_size);
+		} while (c_fd == -1 && errno == EINTR);
 
 		/* Create threads for each client */
 

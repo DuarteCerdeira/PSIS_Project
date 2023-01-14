@@ -28,8 +28,6 @@ pthread_mutex_t win_mtx = PTHREAD_MUTEX_INITIALIZER;
 bool dead = false; // Flag to be triggered when the player dies
 pthread_mutex_t dead_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-long client_id;
-
 void disconnect()
 {
 	// The argument is used to know if we want to send a message to the server
@@ -84,14 +82,9 @@ void *recv_field(void *arg)
 		{
 			char *ptr = &buffer[nbytes];
 			nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
-			if (nbytes == -1)
-			{
-				perror("recv: ");
-				exit(-1);
-			}
-		} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
+		} while (nbytes < sizeof(struct msg_data) && nbytes > 0);
 
-		if (nbytes == 0)
+		if (nbytes <= 0)
 
 			disconnect();
 
@@ -99,12 +92,21 @@ void *recv_field(void *arg)
 
 		if (msg.type == FSTATUS)
 		{
+			// Ignore field status messages if the player is dead
+			pthread_mutex_lock(&dead_mtx);
+			if (dead)
+			{
+				pthread_mutex_unlock(&dead_mtx);
+				continue;
+			}
+			pthread_mutex_unlock(&dead_mtx);
+
 			/* == Critical Region == */
 			pthread_mutex_lock(&win_mtx);
 			// Print the field
 			update_field(game_win, msg.field);
-			update_stats(stats_win, msg.field);
 			wrefresh(game_win);
+			update_stats(stats_win, msg.field);
 			wrefresh(stats_win);
 			pthread_mutex_unlock(&win_mtx);
 			/* ===================== */
@@ -121,7 +123,7 @@ void *recv_field(void *arg)
 			box(stats_win, 0, 0);
 			mvwprintw(stats_win, 1, 1, "You died :/");
 			mvwprintw(stats_win, 3, 1, "Keep playing?");
-			mvwprintw(stats_win, 5, 1, "Press the Y key");
+			mvwprintw(stats_win, 5, 1, "Press any key");
 			mvwprintw(stats_win, 6, 1, "to continue");
 			mvwprintw(stats_win, 7, 1, "in the next 10s");
 			wrefresh(stats_win);
@@ -153,8 +155,6 @@ int main(int argc, char *argv[])
 
 	// We want to catch
 	signal(SIGINT, sigint_handler);
-
-	client_id = (long)getpid();
 
 	// open socket
 	client_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -267,9 +267,14 @@ int main(int argc, char *argv[])
 		// Read key input
 		key = wgetch(game_win);
 
-		// This IF became messier due to the continue game checking
+		// This key check became messier due to the continue game checking
 		pthread_mutex_lock(&dead_mtx);
-		if (dead && key == 'y')
+		if (key == 27 || key == 'q')
+		{
+			pthread_mutex_unlock(&dead_mtx);
+			break;
+		}
+		else if (dead)
 		{
 			pthread_mutex_lock(&win_mtx);
 			werase(stats_win);
@@ -282,11 +287,6 @@ int main(int argc, char *argv[])
 		}
 		else if (!dead && (key == KEY_UP || key == KEY_DOWN || key == KEY_LEFT || key == KEY_RIGHT))
 			msg.dir = get_direction(key);
-		else if (key == 27 || key == 'q')
-		{
-			pthread_mutex_unlock(&dead_mtx);
-			break;
-		}
 		else
 		{
 			pthread_mutex_unlock(&dead_mtx);
