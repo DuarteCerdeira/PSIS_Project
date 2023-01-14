@@ -153,7 +153,7 @@ int main(int argc, char *argv[])
 		exit(-1);
 	}
 
-	// We want to catch
+	// We want to catch CTRL + C
 	signal(SIGINT, sigint_handler);
 
 	// open socket

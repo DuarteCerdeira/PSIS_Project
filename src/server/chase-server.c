@@ -6,6 +6,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <errno.h>
+#include <signal.h>
 
 /* Threads */
 #include <pthread.h>
@@ -38,7 +39,17 @@ struct client_info
 	ball_info_t info;
 };
 
+/* Args sent by a client thread to a respawn timer thread it creates */
+struct thread_args
+{
+	int client_index;
+	pthread_t client_thread;
+};
+
 /* Global variables */
+
+// Global so we can orderly close the socket on CTRL + C
+int server_socket;
 
 // Each global variable has a corresponding mutex
 static struct client_info balls[MAX_BALLS];
@@ -61,6 +72,19 @@ pthread_mutex_t mux_stats_win;
 
 static char board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
 static pthread_mutex_t mux_board_grid;
+
+// Function to deal with CTRL + C as an orderly shutdown
+void sigint_handler(int signum)
+{
+	for (int i = 0; i < MAX_BALLS; i++)
+	{
+		if (balls[i].type == PLAYER)
+			close(balls[i].fd);
+	}
+	close(server_socket);
+	endwin();
+	exit(0);
+}
 
 void field_status(ball_info_t *field)
 {
@@ -106,6 +130,35 @@ ball_info_t create_ball()
 	} while (board_grid[new_ball.pos_x][new_ball.pos_y] != -1);
 
 	return new_ball;
+}
+
+void delete_player(int index)
+{
+	/* == Critical Region == */
+	pthread_mutex_lock(&mux_balls);
+	pthread_mutex_lock(&mux_active_balls);
+
+	// Delete the player
+	pthread_mutex_lock(&mux_game_win);
+	delete_ball(game_win, &balls[index].info);
+	wrefresh(game_win);
+	pthread_mutex_unlock(&mux_game_win);
+
+	pthread_mutex_lock(&mux_board_grid);
+	board_grid[balls[index].info.pos_x][balls[index].info.pos_y] = -1;
+	pthread_mutex_unlock(&mux_board_grid);
+
+	close(balls[index].fd);
+	// Delete player information
+
+	memset(&balls[index], 0, sizeof(struct client_info));
+	active_balls--;
+
+	pthread_mutex_unlock(&mux_balls);
+	pthread_mutex_unlock(&mux_active_balls);
+	/* ===================== */
+
+	pthread_cond_signal(&cond_field_status);
 }
 
 void handle_move(int ball_id, direction_t dir)
@@ -356,21 +409,17 @@ void *handle_prizes(void *arg)
 }
 
 // Thread function to wait 10s for a dead player's continue game
-void *respawn_timer(void *arg)
+void *respawn_timer(void *args)
 {
 	// This thread will be killed if the client sends a msg
-	int index = *(int *)arg;
-	sleep(10);
-	// If not, just disconnect the client
-	pthread_mutex_lock(&mux_balls);
-	pthread_mutex_lock(&mux_active_balls);
-	// Make sure we signal that this player "doesn't exist" anymore
-	// So that fstatus stops being sent to it after closing its FD
-	close(balls[index].fd);
-	balls[index].type = EMPTY;
-	pthread_mutex_unlock(&mux_active_balls);
-	pthread_mutex_unlock(&mux_balls);
+	struct thread_args params = *(struct thread_args *)args;
+	int index = params.client_index;
+	pthread_t c_thread = params.client_thread;
 
+	sleep(10);
+	// If not, just delete the ball and disconnect the player
+	delete_player(index);
+	pthread_cancel(c_thread);
 	return NULL;
 }
 
@@ -383,6 +432,7 @@ void *client_thread(void *arg)
 	struct msg_data msg;
 	char buffer[sizeof(struct msg_data)];
 	pthread_t respawn_thread; // Respawn timer thread variable in case we need it
+	pthread_t self_thread = pthread_self();
 
 	client.fd = *(int *)arg;
 
@@ -394,8 +444,12 @@ void *client_thread(void *arg)
 
 		// Check if the client sent any message after dying (to reconnect)
 		if (client.info.ch != 0 && client.info.hp == 0)
+		{
+			// Send this thread's ID to the respawn timer thread in case it needs to shut it down
+			struct thread_args args = {index, self_thread};
 			// Create thread to countdown the respawn time
-			pthread_create(&respawn_thread, NULL, respawn_timer, &index);
+			pthread_create(&respawn_thread, NULL, respawn_timer, &args);
+		}
 
 		// Receive message from client
 		do
@@ -547,32 +601,7 @@ void *client_thread(void *arg)
 		pthread_cond_signal(&cond_field_status);
 	}
 
-	// Delete the player
-	pthread_mutex_lock(&mux_game_win);
-	delete_ball(game_win, &client.info);
-	wrefresh(game_win);
-	pthread_mutex_unlock(&mux_game_win);
-
-	/* == Critical Region == */
-	pthread_mutex_lock(&mux_board_grid);
-	board_grid[client.info.pos_x][client.info.pos_y] = -1;
-	pthread_mutex_unlock(&mux_board_grid);
-	/* ===================== */
-
-	// Delete player information
-	/* == Critical Region == */
-	pthread_mutex_lock(&mux_balls);
-	pthread_mutex_lock(&mux_active_balls);
-
-	memset(&balls[index], 0, sizeof(struct client_info));
-	active_balls--;
-
-	pthread_mutex_unlock(&mux_balls);
-	pthread_mutex_unlock(&mux_active_balls);
-	/* ===================== */
-	close(client.fd);
-
-	pthread_cond_signal(&cond_field_status);
+	delete_player(index);
 
 	return NULL;
 }
@@ -615,7 +644,10 @@ void *field_update(void *arg)
 
 int main(int argc, char *argv[])
 {
+	// We want to catch CTRL + C
+	signal(SIGINT, sigint_handler);
 	srand(time(NULL));
+
 	int n_bots = 0;
 	int sock_port = 0;
 	// Check arguments and its restrictions
@@ -641,7 +673,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Open socket
-	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
+	server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_socket == -1)
 	{
 		perror("socket: ");
