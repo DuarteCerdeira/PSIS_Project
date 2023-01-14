@@ -1,6 +1,6 @@
 #include <ncurses.h>
 
-#define WINDOW_SIZE 30		   // Window size
+#define WINDOW_SIZE 20		   // Window size
 
 // Direction
 typedef enum direction
@@ -25,5 +25,4 @@ void move_ball(WINDOW *win, ball_info_t *player, direction_t dir);
 void add_ball(WINDOW *win, ball_info_t *player);
 void delete_ball(WINDOW *win, ball_info_t *player);
 
-void update_field(WINDOW *win, ball_info_t players[]);
 void update_stats(WINDOW *win, ball_info_t players[]);

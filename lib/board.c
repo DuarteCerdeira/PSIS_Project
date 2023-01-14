@@ -1,4 +1,5 @@
 #include "board.h"
+#include <curses.h>
 
 void draw(WINDOW *win, ball_info_t ball, bool delete)
 {
@@ -10,6 +11,7 @@ void draw(WINDOW *win, ball_info_t ball, bool delete)
 	{
 		mvwaddch(win, ball.pos_y, ball.pos_x, ball.ch);
 	}
+	wrefresh(win);
 }
 
 void move_ball(WINDOW *win, ball_info_t *ball, direction_t dir)
@@ -58,18 +60,6 @@ void add_ball(WINDOW *win, ball_info_t *ball) { draw(win, *ball, false); }
 
 void delete_ball(WINDOW *win, ball_info_t *ball) { draw(win, *ball, true); }
 
-void update_field(WINDOW *win, ball_info_t players[])
-{
-	werase(win);
-	box(win, 0, 0);
-	int i = 0;
-	while (players[i].ch != 0)
-	{
-		mvwaddch(win, players[i].pos_y, players[i].pos_x, players[i].ch);
-		i++;
-	}
-}
-
 void update_stats(WINDOW *win, ball_info_t players[])
 {
 	werase(win);
@@ -83,4 +73,5 @@ void update_stats(WINDOW *win, ball_info_t players[])
 			line++;
 		}
 	}
+	wrefresh(win);
 }

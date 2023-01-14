@@ -64,6 +64,20 @@ direction_t get_direction(int direction)
 	}
 }
 
+void update_field(WINDOW *win, ball_info_t players[])
+{
+	werase(win);
+	box(win, 0, 0);
+	for (int i = 0; i < MAX_BALLS; i++)
+	{
+		if (players[i].ch == 0) {
+			continue;
+		}
+		mvwaddch(win, players[i].pos_y, players[i].pos_x, players[i].ch);
+	}
+	wrefresh(win);
+}
+
 // Thread function to recieve field status msgs from server
 void *recv_field(void *arg)
 {

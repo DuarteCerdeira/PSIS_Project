@@ -1,4 +1,5 @@
 #include "../lib/board.h"
+#include "../lib/stack.h"
 
 // Server Socket
 #define SOCKET_PREFIX "/tmp/chase-socket"

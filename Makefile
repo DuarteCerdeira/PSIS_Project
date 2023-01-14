@@ -12,6 +12,8 @@ CLIENT_PATH := ./src/clients/chase-client.c
 SERVER_PATH := ./src/server/chase-server.c
 # Board source code path
 BOARD_PATH := ./lib/board.c
+# Stack source code path
+STACK_PATH := ./lib/stack.c
 
 # Executable extension
 EXT := .out
@@ -29,13 +31,17 @@ client: chase-client.o board.o
 	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-client$(EXT) $(LFLAGS)
 
 # Server executable
-server: chase-server.o board.o
+server: chase-server.o board.o stack.o
 	$(CC) $(addprefix ./obj/, $^) -o ./bin/chase-server$(EXT) $(LFLAGS)
 
 
 # Board object files
 board.o: $(BOARD_PATH) $(HEADERS)
 	$(CC) $(CFLAGS) -c $(BOARD_PATH) -o ./obj/board.o
+
+# Stack object files
+stack.o: $(STACK_PATH) $(HEADERS)
+	$(CC) $(CFLAGS) -c $(STACK_PATH) -o ./obj/stack.o
 
 # Client object files
 chase-client.o: $(CLIENT_PATH) $(HEADERS)
