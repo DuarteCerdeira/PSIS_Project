@@ -3,27 +3,28 @@
 // Server Socket
 #define SOCKET_PREFIX "/tmp/chase-socket"
 
-#define MAX_HP 10					// Maximum HP
-#define MAX_PLAYERS 10				// Maximum number of players, bots AND prizes
-#define BOTS_ID (long)INT32_MAX + 2 // Bots IDs start from this number onwards
+// Maximum HP
+#define MAX_HP 10
+// Maximum number of balls is the area available in the board
+#define MAX_BALLS (WINDOW_SIZE * WINDOW_SIZE)
+// Maximum number of prizes
+#define MAX_PRIZES 10
 
 // Message types
 typedef enum msg_type
 {
 	CONN,
-	DCONN,
 	BINFO,
 	BMOV,
 	FSTATUS,
 	HP0,
-	RJCT
+	CONTGAME
 } msg_type_t;
 
 // Message data
 struct msg_data
 {
-	long player_id;
 	msg_type_t type;
 	direction_t dir;
-	ball_info_t field[MAX_PLAYERS * 3]; // max size -> 10 players + 10 bots + 10 prizes
+	ball_info_t field[MAX_BALLS];
 };

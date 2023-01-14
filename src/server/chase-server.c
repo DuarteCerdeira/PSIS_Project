@@ -5,6 +5,10 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <errno.h>
+#include <signal.h>
+
+/* Threads */
 #include <pthread.h>
 
 /* NCurses */
@@ -12,292 +16,314 @@
 
 /* System libraries */
 #include <sys/socket.h>
-#include <sys/un.h>
+#include <sys/ioctl.h>
+#include <arpa/inet.h>
 
 /* Local libraries */
 #include "../chase.h"
 
-#define INIT_X WINDOW_SIZE / 2 // Initial x position
-#define INIT_Y WINDOW_SIZE / 2 // Initial y position
+// Error handling function
+extern int errno;
 
 /* Client information structure */
 struct client_info
 {
-	long id;
+	int fd;
+	enum client_type
+	{
+		EMPTY,
+		PLAYER,
+		BOT,
+		PRIZE
+	} type;
 	ball_info_t info;
 };
 
-/* Global variables */
-static struct client_info players[MAX_PLAYERS];
-static struct client_info bots[MAX_PLAYERS];
-static struct client_info prizes[MAX_PLAYERS];
+/* Args sent by a client thread to a respawn timer thread it creates */
+struct thread_args
+{
+	int client_index;
+	pthread_t client_thread;
+};
 
-static int active_players;
-static int active_prizes;
-static char active_chars[MAX_PLAYERS];
+/* Global variables */
+
+// Global so we can orderly close the socket on CTRL + C
+int server_socket;
+
+// Each global variable has a corresponding mutex
+static struct client_info balls[MAX_BALLS];
+static pthread_mutex_t mux_balls;
+
+static int active_balls;
+static pthread_mutex_t mux_active_balls;
+
+static int n_prizes;
+static pthread_mutex_t mux_n_prizes;
+
+// Conditional variable used to broadcast field info
+static pthread_cond_t cond_field_status = PTHREAD_COND_INITIALIZER;
 
 // Windows
-WINDOW *game_win = NULL;
-WINDOW *msg_win = NULL;
+static WINDOW *game_win;
+pthread_mutex_t mux_game_win;
+static WINDOW *stats_win;
+pthread_mutex_t mux_stats_win;
 
-static long board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
+static char board_grid[WINDOW_SIZE][WINDOW_SIZE] = {0};
+static pthread_mutex_t mux_board_grid;
 
-struct client_info *select_ball(long id)
+// Function to deal with CTRL + C as an orderly shutdown
+void sigint_handler(int signum)
 {
-	int i;
-	struct client_info *ball;
-
-	// Ball is a prize
-	if (id < 0)
+	for (int i = 0; i < MAX_BALLS; i++)
 	{
-		ball = &prizes[-id - 1];
+		if (balls[i].type == PLAYER)
+			close(balls[i].fd);
 	}
-
-	// Ball is a bot
-	else if (id >= BOTS_ID)
-	{
-		// Are the bots IDs sequential??
-		// that would make this way simpler [D]
-		for (i = 0; i < MAX_PLAYERS; i++)
-		{
-			if (bots[i].id == id)
-				break;
-		}
-		ball = (i == MAX_PLAYERS) ? NULL : &bots[i];
-	}
-
-	// Ball is a player
-	else
-	{
-		for (i = 0; i < MAX_PLAYERS; i++)
-		{
-			if (players[i].id == id)
-				break;
-		}
-		ball = (i == MAX_PLAYERS) ? NULL : &players[i];
-	}
-
-	return ball;
-}
-
-struct client_info *check_collision(int x, int y, long id)
-{
-	// Checks wether the position is occupied and
-	// returns the ball in that position
-	return board_grid[x][y] != 0 ? select_ball(board_grid[x][y]) : NULL;
+	close(server_socket);
+	endwin();
+	exit(0);
 }
 
 void field_status(ball_info_t *field)
 {
-	int j = 0;
-
-	// Fills out players information
-	for (int i = 0; i < active_players; i++)
+	// Fills out player information
+	int f_index = 0;
+	for (int i = 0; i < MAX_BALLS; i++)
 	{
-		field[i].ch = players[i].info.ch;
-		field[i].hp = players[i].info.hp;
-		field[i].pos_x = players[i].info.pos_x;
-		field[i].pos_y = players[i].info.pos_y;
-		j++;
-	}
-
-	// Fills out bots information
-	for (int i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (bots[i].id == 0)
+		if (balls[i].type == EMPTY)
 			continue;
-		field[j].ch = bots[i].info.ch;
-		field[j].hp = bots[i].info.hp;
-		field[j].pos_x = bots[i].info.pos_x;
-		field[j].pos_y = bots[i].info.pos_y;
-		j++;
+		field[f_index].ch = balls[i].info.ch;
+		field[f_index].hp = balls[i].info.hp;
+		field[f_index].pos_x = balls[i].info.pos_x;
+		field[f_index].pos_y = balls[i].info.pos_y;
+		f_index++;
 	}
 
-	// Fills out prizes information
-	for (int i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (prizes[i].id != 0)
-		{
-			field[j].ch = prizes[i].info.ch;
-			field[j].hp = prizes[i].info.hp;
-			field[j].pos_x = prizes[i].info.pos_x;
-			field[j].pos_y = prizes[i].info.pos_y;
-			j++;
-		}
-	}
+	pthread_mutex_lock(&mux_stats_win);
+	update_stats(stats_win, field);
+	wrefresh(stats_win);
+	pthread_mutex_unlock(&mux_stats_win);
+
 	return;
 }
 
-struct client_info *handle_player_connection(WINDOW *win, struct sockaddr_un client)
+ball_info_t create_ball()
 {
-	// Player limit reached
-	if (active_players >= MAX_PLAYERS)
-	{
-		return NULL;
-	}
-
-	// Extract the client pid from the address
-	char *client_address = client.sun_path;
-	char *client_address_pid = strrchr(client_address, '-') + 1;
+	ball_info_t new_ball;
 
 	// Select a random character to assign to the player
 	char rand_char;
-	do
-	{
-		rand_char = rand() % ('Z' - 'A') + 'A';
-	} while (strchr(active_chars, rand_char) != NULL);
+	srand(time(NULL));
+
+	rand_char = rand() % ('Z' - 'A') + 'A';
 
 	// Save player information
-	players[active_players].id = atoi(client_address_pid);
-	players[active_players].info.ch = rand_char;
-	players[active_players].info.hp = MAX_HP;
-	players[active_players].info.pos_x = INIT_X;
-	players[active_players].info.pos_y = INIT_Y;
+	new_ball.ch = rand_char;
+	new_ball.hp = MAX_HP;
+	// Generate a random position that is not occupied
+	do
+	{
+		new_ball.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
+		new_ball.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
+	} while (board_grid[new_ball.pos_x][new_ball.pos_y] != -1);
 
-	// Add the assigned character to the list of
-	// used characters
-	active_chars[active_players] = rand_char;
-
-	add_ball(win, &players[active_players].info);
-
-	return &players[active_players++];
+	return new_ball;
 }
 
-void handle_player_disconnection(WINDOW *win, struct client_info *player)
+void delete_player(int index)
 {
-	// Delete the ball from the board
-	delete_ball(win, &player->info);
-	board_grid[player->info.pos_x][player->info.pos_y] = 0;
+	/* == Critical Region == */
+	pthread_mutex_lock(&mux_balls);
+	pthread_mutex_lock(&mux_active_balls);
 
-	// Delete the character from the list of used characters
-	*strrchr(active_chars, player->info.ch) = active_chars[active_players - 1];
-	active_chars[active_players - 1] = '\0';
+	// Delete the player
+	pthread_mutex_lock(&mux_game_win);
+	delete_ball(game_win, &balls[index].info);
+	wrefresh(game_win);
+	pthread_mutex_unlock(&mux_game_win);
 
+	pthread_mutex_lock(&mux_board_grid);
+	board_grid[balls[index].info.pos_x][balls[index].info.pos_y] = -1;
+	pthread_mutex_unlock(&mux_board_grid);
+
+	close(balls[index].fd);
 	// Delete player information
-	*player = players[active_players - 1];
-	memset(&players[active_players - 1], 0, sizeof(struct client_info));
 
-	active_players--;
+	memset(&balls[index], 0, sizeof(struct client_info));
+	active_balls--;
+
+	pthread_mutex_unlock(&mux_balls);
+	pthread_mutex_unlock(&mux_active_balls);
+	/* ===================== */
+
+	pthread_cond_signal(&cond_field_status);
 }
 
-void handle_move(WINDOW *win, struct client_info *ball, direction_t dir)
+void handle_move(int ball_id, direction_t dir)
 {
-	struct client_info *ball_hit;
+	struct client_info ball = balls[ball_id];
 
 	// Check if the position the ball wants to move to is clear
+	int ball_hit_id;
 	switch (dir)
 	{
 	case UP:
-		ball_hit = check_collision(ball->info.pos_x, ball->info.pos_y - 1, ball->id);
+		if (ball.info.pos_y < 1)
+		{
+			return;
+		}
+		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y - 1];
 		break;
 	case DOWN:
-		ball_hit = check_collision(ball->info.pos_x, ball->info.pos_y + 1, ball->id);
+		if (ball.info.pos_y > WINDOW_SIZE - 1)
+		{
+			return;
+		}
+		ball_hit_id = board_grid[ball.info.pos_x][ball.info.pos_y + 1];
 		break;
 	case LEFT:
-		ball_hit = check_collision(ball->info.pos_x - 1, ball->info.pos_y, ball->id);
+		if (ball.info.pos_x < 1)
+		{
+			return;
+		}
+		ball_hit_id = board_grid[ball.info.pos_x - 1][ball.info.pos_y];
 		break;
 	case RIGHT:
-		ball_hit = check_collision(ball->info.pos_x + 1, ball->info.pos_y, ball->id);
+		if (ball.info.pos_x > WINDOW_SIZE - 1)
+		{
+			return;
+		}
+		ball_hit_id = board_grid[ball.info.pos_x + 1][ball.info.pos_y];
 		break;
 	default:
 		break;
 	}
 
 	// No ball was hit
-	if (ball_hit == NULL)
+	if (ball_hit_id == -1)
 	{
 		// Ball position is updated
-		board_grid[ball->info.pos_x][ball->info.pos_y] = 0;
-		move_ball(win, &ball->info, dir);
-		board_grid[ball->info.pos_x][ball->info.pos_y] = ball->id;
+
+		board_grid[ball.info.pos_x][ball.info.pos_y] = -1;
+		move_ball(game_win, &ball.info, dir);
+		board_grid[ball.info.pos_x][ball.info.pos_y] = ball_id;
+
+		memcpy(&balls[ball_id], &ball, sizeof(struct client_info));
 		return;
 	}
+
+	struct client_info ball_hit = balls[ball_hit_id];
 
 	// Collision happened - in most cases, the ball doesn't move
 	direction_t new_dir = NONE;
 
 	// Player hit a prize
-	if (ball_hit->id < 0 && ball->id < BOTS_ID)
+	if (ball_hit.type == PRIZE && ball.type == PLAYER)
 	{
 		// Player's health is updated
-		int health = ball_hit->info.hp;
-		ball->info.hp += (ball->info.hp + health > MAX_HP) ? MAX_HP - ball->info.hp : health;
-
+		int health = ball_hit.info.hp;
+		ball.info.hp += (ball.info.hp + health > MAX_HP) ? MAX_HP - ball.info.hp : health;
 		// Prize is deleted
-		struct client_info *last_prize = &prizes[active_prizes - 1];
+		delete_ball(game_win, &ball_hit.info);
+		ball_hit = (struct client_info){0};
 
-		last_prize->id = ball_hit->id;
-		board_grid[last_prize->info.pos_x][last_prize->info.pos_y] = ball_hit->id;
+		pthread_mutex_lock(&mux_n_prizes);
+		n_prizes--;
+		pthread_mutex_unlock(&mux_n_prizes);
 
-		*ball_hit = *last_prize;
-		memset(last_prize, 0, sizeof(struct client_info));
-		active_prizes--;
+		active_balls--;
 
 		// Player position needs to be updated
 		new_dir = dir;
 	}
 
 	// Ball (player or bot) hit a player
-	else if (ball_hit->id < BOTS_ID && ball_hit->id > 0)
+	else if (ball_hit.type == PLAYER)
 	{
 		// Ball "steals" 1 HP from the player
-		ball->info.hp == MAX_HP ? MAX_HP : ball->info.hp++;
-		ball_hit->info.hp == 0 ? 0 : ball_hit->info.hp--;
+		ball.info.hp == MAX_HP ? MAX_HP : ball.info.hp++;
+		ball_hit.info.hp == 0 ? 0 : ball_hit.info.hp--;
 	}
 
-	board_grid[ball->info.pos_x][ball->info.pos_y] = 0;
-	move_ball(win, &ball->info, new_dir);
-	board_grid[ball->info.pos_x][ball->info.pos_y] = ball->id;
-}
+	board_grid[ball.info.pos_x][ball.info.pos_y] = -1;
+	move_ball(game_win, &ball.info, new_dir);
+	board_grid[ball.info.pos_x][ball.info.pos_y] = ball_id;
 
-void print_player_stats(WINDOW *win)
-{
-	ball_info_t p_stats[MAX_PLAYERS] = {0};
-	for (size_t i = 0; i < MAX_PLAYERS; i++)
-	{
-		if (players[i].id == 0)
-			continue;
-
-		p_stats[i].ch = players[i].info.ch;
-		p_stats[i].hp = players[i].info.hp;
-		p_stats[i].pos_x = players[i].info.pos_x;
-		p_stats[i].pos_y = players[i].info.pos_y;
-	}
-
-	update_stats(win, p_stats);
-	return;
+	memcpy(&balls[ball_id], &ball, sizeof(struct client_info));
+	memcpy(&balls[ball_hit_id], &ball_hit, sizeof(struct client_info));
 }
 
 // Thread function that handles bots
 void *handle_bots(void *arg)
 {
 	int n_bots = *(int *)arg;
+	int bot_index[n_bots];
+	struct client_info new_bot;
 
 	// Create bots
 	for (int i = 0; i < n_bots; i++)
 	{
+		int x;
+		int y;
+
+		/* Critical Region */
+		pthread_mutex_lock(&mux_active_balls);
+		pthread_mutex_lock(&mux_board_grid);
+		pthread_mutex_lock(&mux_balls);
+		do
+		{
+			x = rand() % (WINDOW_SIZE - 2) + 1;
+			y = rand() % (WINDOW_SIZE - 2) + 1;
+		} while (board_grid[x][y] != -1);
+
 		// Initialize bots information
-		bots[i].id = (long)BOTS_ID + i;
-		bots[i].info.ch = '*';
-		bots[i].info.hp = MAX_HP;
-		bots[i].info.pos_x = rand() % (WINDOW_SIZE - 2) + 1;
-		bots[i].info.pos_y = rand() % (WINDOW_SIZE - 2) + 1;
-		add_ball(game_win, &bots[i].info);
+		new_bot.type = BOT;
+		new_bot.info.ch = '*';
+		new_bot.info.hp = MAX_HP;
+		new_bot.info.pos_x = x;
+		new_bot.info.pos_y = y;
+
+		// We don't have to look for a free space in the data struct
+		// as the bots are the first balls to be created
+		memcpy(&balls[active_balls], &new_bot, sizeof(new_bot));
+		bot_index[i] = active_balls;
+		board_grid[new_bot.info.pos_x][new_bot.info.pos_y] = active_balls;
+		active_balls++;
+
+		pthread_mutex_unlock(&mux_balls);
+		pthread_mutex_unlock(&mux_board_grid);
+		pthread_mutex_unlock(&mux_active_balls);
+		/* =============== */
+
+		pthread_mutex_lock(&mux_game_win);
+		add_ball(game_win, &new_bot.info);
+		wrefresh(game_win);
+		pthread_mutex_unlock(&mux_game_win);
 	}
 
 	while (1)
 	{
-		for (int i = 0; i < MAX_PLAYERS; i++)
+		for (int i = 0; i < n_bots; i++)
 		{
-			if (bots[i].id == 0)
-				continue;
-
+			int index = bot_index[i];
 			// Get a random direction
 			direction_t dir = random() % 4 + 1;
-			handle_move(game_win, &bots[i], dir);
-			board_grid[bots[i].info.pos_x][bots[i].info.pos_y] = bots[i].id;
+			/* Critical Region */
+			pthread_mutex_lock(&mux_board_grid);
+			pthread_mutex_lock(&mux_active_balls);
+			pthread_mutex_lock(&mux_balls);
+			pthread_mutex_lock(&mux_game_win);
+			handle_move(index, dir);
+			wrefresh(game_win);
+			pthread_mutex_unlock(&mux_game_win);
+			pthread_mutex_unlock(&mux_balls);
+			pthread_mutex_unlock(&mux_active_balls);
+			pthread_mutex_unlock(&mux_board_grid);
+			/* =============== */
 		}
-		wrefresh(game_win);
+		pthread_cond_signal(&cond_field_status);
 		sleep(3);
 	}
 }
@@ -305,36 +331,37 @@ void *handle_bots(void *arg)
 // Thread function that handles the prizes
 void *handle_prizes(void *arg)
 {
-	// Create initial prizes
-	for (int i = 0; i < 5; i++)
-	{
-		int x;
-		int y;
-
-		// Generate a random position that is not occupied
-		do
-		{
-			x = rand() % (WINDOW_SIZE - 2) + 1;
-			y = rand() % (WINDOW_SIZE - 2) + 1;
-		} while (board_grid[x][y] != 0);
-
-		// Generate a prize with a random value between 1 and 5
-		int value = rand() % 5 + 1;
-		prizes[i].info.pos_x = x;
-		prizes[i].info.pos_y = y;
-		prizes[i].info.ch = value + '0';
-		prizes[i].info.hp = value;
-		prizes[i].id = -(i + 1);
-		active_prizes++;
-		add_ball(game_win, &prizes[i].info);
-	}
+	struct client_info new_prize;
+	int first_prizes = 0;
 
 	// Generate a new prize every 5 seconds
 	while (1)
 	{
-		sleep(5);
-		if (active_prizes == 10)
+		// Generate the first five prizes
+		if (first_prizes < 5)
+		{
+			first_prizes++;
+		}
+		else
+		{
+			sleep(5);
+		}
+
+		/* Critical Region */
+		pthread_mutex_lock(&mux_active_balls);
+		pthread_mutex_lock(&mux_board_grid);
+		pthread_mutex_lock(&mux_balls);
+
+		// do nothing if the board is full or there are already
+		// the maximum number of prizes
+		if (n_prizes == MAX_PRIZES || active_balls >= MAX_BALLS)
+		{
+			pthread_mutex_unlock(&mux_balls);
+			pthread_mutex_unlock(&mux_board_grid);
+			pthread_mutex_unlock(&mux_active_balls);
 			continue;
+		}
+
 		int x;
 		int y;
 
@@ -343,29 +370,300 @@ void *handle_prizes(void *arg)
 		{
 			x = rand() % (WINDOW_SIZE - 2) + 1;
 			y = rand() % (WINDOW_SIZE - 2) + 1;
-		} while (board_grid[x][y] != 0);
+		} while (board_grid[x][y] != -1);
 
 		// Generate a prize with a random value between 1 and 5
 		int value = rand() % 5 + 1;
-		prizes[active_prizes].info.pos_x = x;
-		prizes[active_prizes].info.pos_y = y;
-		prizes[active_prizes].info.ch = value + '0';
-		prizes[active_prizes].info.hp = value;
-		prizes[active_prizes].id = -(active_prizes + 1);
-		active_prizes++;
-		add_ball(game_win, &prizes[active_prizes - 1].info);
+
+		new_prize.info.pos_x = x;
+		new_prize.info.pos_y = y;
+		new_prize.info.ch = value + '0';
+		new_prize.info.hp = value;
+		new_prize.type = PRIZE;
+
+		int free_index = 0;
+		while (free_index < MAX_BALLS && balls[free_index].type != EMPTY)
+			free_index++;
+		memcpy(&balls[free_index], &new_prize, sizeof(struct client_info));
+
+		board_grid[x][y] = free_index;
+
+		active_balls++;
+
+		pthread_mutex_unlock(&mux_balls);
+		pthread_mutex_unlock(&mux_board_grid);
+		pthread_mutex_unlock(&mux_active_balls);
+		/* =============== */
+
+		pthread_mutex_lock(&mux_n_prizes);
+		n_prizes++;
+		pthread_mutex_unlock(&mux_n_prizes);
+
+		pthread_mutex_lock(&mux_game_win);
+		add_ball(game_win, &new_prize.info);
 		wrefresh(game_win);
+		pthread_mutex_unlock(&mux_game_win);
+
+		pthread_cond_signal(&cond_field_status);
+	}
+}
+
+// Thread function to wait 10s for a dead player's continue game
+void *respawn_timer(void *args)
+{
+	// This thread will be killed if the client sends a msg
+	struct thread_args params = *(struct thread_args *)args;
+	int index = params.client_index;
+	pthread_t c_thread = params.client_thread;
+
+	sleep(10);
+	// If not, just delete the ball and disconnect the player
+	delete_player(index);
+	pthread_cancel(c_thread);
+	return NULL;
+}
+
+// Thread function that handles each client
+void *client_thread(void *arg)
+{
+	struct client_info client = {0};
+	int index = 0;
+	int nbytes = 0;
+	struct msg_data msg;
+	char buffer[sizeof(struct msg_data)];
+	pthread_t respawn_thread; // Respawn timer thread variable in case we need it
+	pthread_t self_thread = pthread_self();
+
+	client.fd = *(int *)arg;
+
+	while (client.fd != -1)
+	{
+		nbytes = 0;
+		msg = (struct msg_data){0};
+		memset(buffer, 0, sizeof(buffer));
+
+		// Check if the client sent any message after dying (to reconnect)
+		if (client.info.ch != 0 && client.info.hp == 0)
+		{
+			// Send this thread's ID to the respawn timer thread in case it needs to shut it down
+			struct thread_args args = {index, self_thread};
+			// Create thread to countdown the respawn time
+			pthread_create(&respawn_thread, NULL, respawn_timer, &args);
+		}
+
+		// Receive message from client
+		do
+		{
+			nbytes = 0;
+			char *ptr = &buffer[nbytes];
+			nbytes += recv(client.fd, ptr, sizeof(buffer) - nbytes, 0);
+		} while (nbytes < sizeof(struct msg_data) && nbytes > 0);
+
+		// Socket was closed, either by the client or by the respawn timeout
+		if (nbytes <= 0)
+			break;
+
+		// Stop the respawn timer thread if the client sent a message
+		if (client.info.ch != 0 && client.info.hp == 0)
+			pthread_cancel(respawn_thread);
+
+		memcpy(&msg, buffer, sizeof(buffer));
+
+		switch (msg.type)
+		{
+		case (CONN):
+
+			/* Critical Region */
+			pthread_mutex_lock(&mux_active_balls);
+			pthread_mutex_lock(&mux_balls);
+			pthread_mutex_lock(&mux_board_grid);
+
+			// Create a new ball structure
+			client.info = create_ball();
+			client.type = PLAYER;
+
+			// If the board is full reject the player
+			if (active_balls == MAX_BALLS)
+			{
+				close(client.fd);
+				client.fd = -1;
+
+				pthread_mutex_unlock(&mux_board_grid);
+				pthread_mutex_unlock(&mux_active_balls);
+				pthread_mutex_unlock(&mux_balls);
+				continue;
+			}
+
+			// Find a free spot and save the position of the player
+			index = 0;
+			while (index < MAX_BALLS && balls[index].type != EMPTY)
+				index++;
+
+			// Update balls structure and game board with new player
+			balls[index] = client;
+			board_grid[client.info.pos_x][client.info.pos_y] = index;
+
+			pthread_mutex_unlock(&mux_board_grid);
+			pthread_mutex_unlock(&mux_active_balls);
+			pthread_mutex_unlock(&mux_balls);
+			/* =============== */
+
+			// Update the board
+			/* Critical Region */
+			pthread_mutex_lock(&mux_game_win);
+			add_ball(game_win, &client.info);
+			wrefresh(game_win);
+			pthread_mutex_unlock(&mux_game_win);
+			/* =============== */
+
+			// Send BINFO message back to the client
+			memset(&msg, 0, sizeof(struct msg_data));
+
+			msg.type = BINFO;
+			msg.field[0] = client.info;
+
+			nbytes = 0;
+			memset(buffer, 0, sizeof(struct msg_data));
+
+			// Copy the data to a byte buffer so there are no problems with
+			// byte order
+			memcpy(buffer, &msg, sizeof(struct msg_data));
+
+			// This guarantees that all the data is sent
+			do
+			{
+				char *ptr = &buffer[nbytes];
+				nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
+			} while (nbytes < sizeof(struct msg_data));
+			break;
+
+		case (BMOV):
+
+			/* Critical Region */
+			pthread_mutex_lock(&mux_active_balls);
+			pthread_mutex_lock(&mux_board_grid);
+			pthread_mutex_lock(&mux_balls);
+
+			if (balls[index].info.hp == 0)
+			{
+				// Player is dead
+				memset(&msg, 0, sizeof(struct msg_data));
+				msg.type = HP0;
+
+				nbytes = 0;
+				memset(buffer, 0, sizeof(struct msg_data));
+
+				// Copy the data to a byte buffer so there are no problems with
+				// byte order
+				memcpy(buffer, &msg, sizeof(struct msg_data));
+
+				// This guarantees that all the data is sent
+				do
+				{
+					char *ptr = &buffer[nbytes];
+					nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
+				} while (nbytes < sizeof(struct msg_data));
+			}
+			else
+			{
+				pthread_mutex_lock(&mux_game_win);
+
+				handle_move(index, msg.dir);
+				wrefresh(game_win);
+
+				pthread_mutex_unlock(&mux_game_win);
+			}
+
+			// Update the client info in this thread after the move
+			client = balls[index];
+			pthread_mutex_unlock(&mux_active_balls);
+			pthread_mutex_unlock(&mux_board_grid);
+			pthread_mutex_unlock(&mux_balls);
+
+			break;
+		case (CONTGAME):
+			// Revive the player
+			pthread_mutex_lock(&mux_balls);
+			pthread_mutex_lock(&mux_active_balls);
+
+			/* Critical Region */
+			balls[index].info.hp = MAX_HP;
+			client = balls[index];
+			/* =============== */
+
+			pthread_mutex_unlock(&mux_active_balls);
+			pthread_mutex_unlock(&mux_balls);
+			break;
+		default:
+			continue;
+		}
+
+		pthread_cond_signal(&cond_field_status);
+	}
+
+	delete_player(index);
+
+	return NULL;
+}
+
+// Thread function to broadcast the field status to all clients
+void *field_update(void *arg)
+{
+	while (1)
+	{
+		pthread_mutex_lock(&mux_balls);
+		pthread_cond_wait(&cond_field_status, &mux_balls);
+
+		struct msg_data msg = {0};
+
+		msg.type = FSTATUS;
+		field_status(msg.field);
+
+		for (int i = 0; i < MAX_BALLS; i++)
+		{
+			// Send to (active) clients only
+			if (balls[i].type != PLAYER)
+				continue;
+
+			// Send message to client
+			int nbytes = 0;
+			char buffer[sizeof(struct msg_data)] = {0};
+
+			memcpy(buffer, &msg, sizeof(struct msg_data));
+
+			do
+			{
+				char *ptr = &buffer[nbytes];
+				nbytes += send(balls[i].fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
+			} while (nbytes < sizeof(struct msg_data));
+		}
+
+		pthread_mutex_unlock(&mux_balls);
 	}
 }
 
 int main(int argc, char *argv[])
 {
+	// We want to catch CTRL + C
+	signal(SIGINT, sigint_handler);
 	srand(time(NULL));
+
 	int n_bots = 0;
+	int sock_port = 0;
 	// Check arguments and its restrictions
 	if (argc != 4)
 	{
 		printf("Usage: %s <server_IP> <server_port> <number_of_bots [1,10]>", argv[0]);
+		exit(-1);
+	}
+	else if (inet_addr(argv[1]) == INADDR_NONE)
+	{
+		printf("Invalid IP address\n");
+		exit(-1);
+	}
+	else if ((sock_port = atoi(argv[2])) < 1024 || sock_port > 65535)
+	{
+		printf("Invalid server port\n");
 		exit(-1);
 	}
 	else if ((n_bots = atoi(argv[3])) < 1 || n_bots > 10)
@@ -375,24 +673,35 @@ int main(int argc, char *argv[])
 	}
 
 	// Open socket
-	int server_socket = socket(AF_UNIX, SOCK_DGRAM, 0);
+	server_socket = socket(AF_INET, SOCK_STREAM, 0);
 	if (server_socket == -1)
 	{
-		perror("socket");
+		perror("socket: ");
 		exit(-1);
 	}
+
 	// Bind address
-	struct sockaddr_un server_address;
-	server_address.sun_family = AF_UNIX;
-	sprintf(server_address.sun_path, "%s-%s", SOCKET_PREFIX, "server");
-
-	unlink(server_address.sun_path);
-
-	int err = bind(server_socket, (struct sockaddr *)&server_address,
-				   sizeof(server_address));
-	if (err == -1)
+	struct sockaddr_in server_address;
+	server_address.sin_family = AF_INET;
+	if ((server_address.sin_port = htons(sock_port)) == 0)
 	{
-		perror("bind");
+		perror("htons port: ");
+		exit(-1);
+	}
+	if (inet_pton(AF_INET, argv[1], &server_address.sin_addr) <= 0)
+	{
+		perror("inet_pton: ");
+		exit(-1);
+	}
+	if (bind(server_socket, (struct sockaddr *)&server_address,
+			 sizeof(server_address)) == -1)
+	{
+		perror("bind: ");
+		exit(-1);
+	}
+	if (listen(server_socket, 10) == -1)
+	{
+		perror("listen: ");
 		exit(-1);
 	}
 
@@ -407,18 +716,18 @@ int main(int argc, char *argv[])
 	wrefresh(game_win);
 
 	// Create the message window
-	msg_win = newwin(MAX_PLAYERS, WINDOW_SIZE, 0, WINDOW_SIZE + 2);
-	box(msg_win, 0, 0);
-	wrefresh(msg_win);
+	stats_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, WINDOW_SIZE + 2); // TODO: CHANGE LATER
+	box(stats_win, 0, 0);
+	wrefresh(stats_win);
 
 	// Store client information
-	struct sockaddr_un client_address;
+	struct sockaddr_in client_address;
 	socklen_t client_address_size;
 
-	active_players = 0;
-	memset(players, 0, sizeof(players));
-	memset(bots, 0, sizeof(bots));
-	memset(prizes, 0, sizeof(prizes));
+	// Initialize global variables
+	active_balls = 0;
+	memset(board_grid, -1, sizeof(board_grid));
+	memset(balls, 0, sizeof(balls));
 
 	// Create thread for handling bots
 	pthread_t bots_thread;
@@ -428,126 +737,34 @@ int main(int argc, char *argv[])
 	pthread_t prizes_thread;
 	pthread_create(&prizes_thread, NULL, handle_prizes, NULL);
 
+	// Create thread to broadcast field info
+	pthread_t field_update_thread;
+	pthread_create(&field_update_thread, NULL, field_update, NULL);
+
+	pthread_t client_threads[MAX_BALLS];
+	int n_clients = 0;
+
 	while (1)
 	{
-		// Wait for messages from clients
+		// Wait for connection requests from clients
+		memset(&client_address, 0, sizeof(client_address));
+		client_address_size = sizeof(struct sockaddr_in);
 
-		memset(&client_address.sun_path, '\0', sizeof(client_address.sun_path));
-		client_address_size = sizeof(struct sockaddr_un);
+		int c_fd = -1;
 
-		struct msg_data msg = {0};
-		int nbytes = recvfrom(server_socket, &msg, sizeof(msg), 0,
-							  (struct sockaddr *)&client_address, &client_address_size);
-
-		// Error occurred
-		if (nbytes == -1)
+		// This loop is to handle the case when the accept() call is interrupted by a signal
+		// Which seems to be very frequent
+		do
 		{
-			perror("recvfrom ");
-			exit(-1);
-		}
+			c_fd = accept(server_socket, (struct sockaddr *)&client_address, &client_address_size);
+		} while (c_fd == -1 && errno == EINTR);
 
-		// Client disconnected (EOF received)
-		if (nbytes == 0)
-		{
-			long player_id = (long)atoi(strrchr(client_address.sun_path, '-') + 1);
-			struct client_info *player = select_ball(player_id);
-			handle_player_disconnection(game_win, player);
-			continue;
-		}
+		/* Create threads for each client */
 
-		switch (msg.type)
-		{
-		case (CONN):
-		{
-			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
+		int *thread_arg = malloc(sizeof(int));
+		*thread_arg = c_fd;
 
-			// Player trying to connect
-			struct client_info *player = handle_player_connection(game_win, client_address);
-
-			// Player limit reached: reject connection
-			if (player == NULL)
-			{
-				msg.type = RJCT;
-			}
-
-			// Send ball info message
-			else
-			{
-				// Setting up the ball info msg
-				// We'll send the ball info by writing it
-				// in the array that usually holds the field status
-				msg.type = BINFO;
-				msg.player_id = player->id;
-				msg.field[0].ch = player->info.ch;
-				msg.field[0].pos_x = player->info.pos_x;
-				msg.field[0].pos_y = player->info.pos_y;
-				msg.field[0].hp = player->info.hp;
-				msg.dir = NONE;
-			}
-			break;
-		}
-		case (DCONN):
-		{
-			// Player trying to disconnect
-			struct client_info *player = select_ball(msg.player_id);
-
-			// Player not found
-			if (player == NULL)
-			{
-				continue;
-			}
-
-			handle_player_disconnection(game_win, player);
-			break;
-		}
-		case (BMOV):
-		{
-			// Ball can be a Bot or a Player
-			struct client_info *player = select_ball(msg.player_id);
-			direction_t dir = msg.dir;
-
-			msg = (struct msg_data){0}; // Cleaning msg so we can reuse it
-
-			// Ball not found: do nothing
-			if (player == NULL)
-			{
-				continue;
-			}
-
-			// Ball HP is 0: disconnect player (only players lose health)
-			if (player->info.hp == 0)
-			{
-				msg.type = HP0;
-				handle_player_disconnection(game_win, player);
-			}
-			else
-			{
-				handle_move(game_win, player, dir);
-
-				// Send field status message
-				msg.type = FSTATUS;
-				field_status(msg.field);
-				update_stats(msg_win, msg.field);
-				msg.player_id = player->id;
-			}
-			break;
-		}
-		default:
-			continue;
-		}
-
-		// Send message back to client
-		sendto(server_socket, &msg, sizeof(msg), 0,
-			   (struct sockaddr *)&client_address, client_address_size);
-
-		memset(&msg, 0, sizeof(msg));
-
-		// Update message window
-		print_player_stats(msg_win);
-
-		wrefresh(msg_win);
-		wrefresh(game_win);
+		pthread_create(&client_threads[n_clients++], NULL, client_thread, thread_arg);
+		// pthread_join(thread_id[--active_players], NULL);
 	}
-	endwin();
-	exit(0);
 }
