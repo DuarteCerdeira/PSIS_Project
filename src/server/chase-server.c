@@ -342,41 +342,6 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 
 }
 
-void print_player_stats()
-{
-	struct client_info balls_copy[10 + 10 + MAX_BALLS];
-	
-	/* Critical region health start*/
-	pthread_mutex_lock(&mux_health);
-	
-	memcpy(balls_copy, balls, sizeof(balls));
-	
-	pthread_mutex_unlock(&mux_health);
-	/* Critical region health end */
-
-	ball_info_t p_stats[MAX_BALLS] = {0};
-	for (size_t i = 0; i < MAX_BALLS; i++)
-	{
-		if (balls_copy[i].type != PLAYER)
-			continue;
-
-		p_stats[i].ch = balls_copy[i].info.ch;
-		p_stats[i].hp = balls_copy[i].info.hp;
-		p_stats[i].pos_x = balls_copy[i].info.pos_x;
-		p_stats[i].pos_y = balls_copy[i].info.pos_y;
-	}
-
-	/* Critical region stats window start */
-	pthread_mutex_lock(&mux_stats_win);
-	
-	update_stats(stats_win, p_stats);
-	
-	pthread_mutex_unlock(&mux_stats_win);
-	/* Critical region stats window end */
-	
-	return;
-}
-
 // Thread function that handles bots
 void *handle_bots(void *arg)
 {
