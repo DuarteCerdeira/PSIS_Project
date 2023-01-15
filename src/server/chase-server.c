@@ -613,12 +613,6 @@ void *client_thread(void *arg)
 				pthread_mutex_unlock(&mux_free_spaces);
 				/* Critical region free_spaces end */
 				
-				pthread_mutex_unlock(&mux_health);
-				/* Critical region position end */
-				
-				pthread_mutex_unlock(&mux_position);
-				/* Critical region health end */
-				
 				return NULL;
 			}
 
@@ -637,7 +631,7 @@ void *client_thread(void *arg)
 			/* Critical region health start */
 			pthread_mutex_lock(&mux_health);
 
-			// Update balls structure and game board with new player
+			// Update balls structure with new player
 			balls[index] = client;
 
 			pthread_mutex_unlock(&mux_health);
