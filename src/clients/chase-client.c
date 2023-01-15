@@ -208,7 +208,7 @@ int main(int argc, char *argv[])
 	keypad(game_win, TRUE);
 
 	// Create the message window
-	stats_win = newwin(WINDOW_SIZE, WINDOW_SIZE, 0, WINDOW_SIZE + 2); // TODO: CHANGE LATER
+	stats_win = newwin(2*WINDOW_SIZE, WINDOW_SIZE, 0, WINDOW_SIZE + 2); // TODO: CHANGE LATER
 	box(stats_win, 0, 0);
 	wrefresh(stats_win);
 
