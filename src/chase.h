@@ -19,6 +19,7 @@ typedef enum msg_type
 	BMOV,
 	FSTATUS,
 	HP0,
+	CONTGAME
 } msg_type_t;
 
 // Message data

@@ -67,7 +67,7 @@ void update_stats(WINDOW *win, ball_info_t players[])
 	int line = 0;
 	for (int i = 0; players[i].ch != 0; i++)
 	{
-		if (players[i].ch > 'A' && players[i].ch < 'Z')
+		if (players[i].ch >= 'A' && players[i].ch <= 'Z')
 		{
 			mvwprintw(win, line + 1, 1, "%c %d", players[i].ch, players[i].hp);
 			line++;
