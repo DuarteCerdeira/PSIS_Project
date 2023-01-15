@@ -27,5 +27,5 @@ struct msg_data
 {
 	msg_type_t type;
 	direction_t dir;
-	ball_info_t field[MAX_BALLS];
+	ball_info_t field[2];
 };

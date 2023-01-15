@@ -20,7 +20,7 @@
 #include "../chase.h"
 
 /* Global variables */
-static int client_socket;
+static int server_socket;
 static WINDOW *game_win;
 static WINDOW *stats_win;
 static struct sockaddr_in server_address;
@@ -34,7 +34,7 @@ void disconnect()
 	// In the HP0 case we don't, but we do in any other case
 	// Even in the CTRL + C case
 
-	close(client_socket);
+	close(server_socket);
 	endwin();
 	exit(0);
 }
@@ -64,11 +64,9 @@ direction_t get_direction(int direction)
 	}
 }
 
-void update_field(WINDOW *win, ball_info_t players[])
+void update_field(WINDOW *win, ball_info_t players[], int n_players)
 {
-	werase(win);
-	box(win, 0, 0);
-	for (int i = 0; i < MAX_BALLS; i++)
+	for (int i = 0; i < n_players; i++)
 	{
 		if (players[i].ch == 0) {
 			continue;
@@ -95,7 +93,7 @@ void *recv_field(void *arg)
 		do
 		{
 			char *ptr = &buffer[nbytes];
-			nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+			nbytes += recv(server_socket, ptr, sizeof(buffer) - nbytes, 0);
 		} while (nbytes < sizeof(struct msg_data) && nbytes > 0);
 
 		if (nbytes <= 0)
@@ -117,11 +115,11 @@ void *recv_field(void *arg)
 
 			/* == Critical Region == */
 			pthread_mutex_lock(&win_mtx);
+			
 			// Print the field
-			update_field(game_win, msg.field);
-			wrefresh(game_win);
+			update_field(game_win, msg.field, 2);
 			update_stats(stats_win, msg.field);
-			wrefresh(stats_win);
+			
 			pthread_mutex_unlock(&win_mtx);
 			/* ===================== */
 		}
@@ -171,8 +169,8 @@ int main(int argc, char *argv[])
 	signal(SIGINT, sigint_handler);
 
 	// open socket
-	client_socket = socket(AF_INET, SOCK_STREAM, 0);
-	if (client_socket == -1)
+	server_socket = socket(AF_INET, SOCK_STREAM, 0);
+	if (server_socket == -1)
 	{
 		perror("socket: ");
 		exit(-1);
@@ -190,7 +188,7 @@ int main(int argc, char *argv[])
 	}
 
 	// Send connection request
-	if (connect(client_socket, (struct sockaddr *)&server_address,
+	if (connect(server_socket, (struct sockaddr *)&server_address,
 				sizeof(server_address)) == -1)
 	{
 		perror("connect: ");
@@ -217,11 +215,10 @@ int main(int argc, char *argv[])
 	struct msg_data msg;
 	msg.type = CONN;
 
-	// Receive initial message from server
 	int nbytes = 0;
 	char buffer[sizeof(struct msg_data)] = {0};
 
-	// Send message to client
+	// Send message to server
 	nbytes = 0;
 	memset(buffer, 0, sizeof(struct msg_data));
 
@@ -230,40 +227,34 @@ int main(int argc, char *argv[])
 	do
 	{
 		char *ptr = &buffer[nbytes];
-		nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+		nbytes += send(server_socket, ptr, sizeof(buffer) - nbytes, 0);
 	} while (nbytes < sizeof(struct msg_data));
 
-	nbytes = 0;
-	memset(buffer, 0, sizeof(struct msg_data));
-
-	// This guarantees all the data is received using socket streams
-	do
-	{
-		char *ptr = &buffer[nbytes];
-		nbytes += recv(client_socket, ptr, sizeof(buffer) - nbytes, 0);
-		if (nbytes == -1)
-		{
-			perror("recv: ");
+	do {
+		// Receive board and BINFO messages from server
+		nbytes = 0;
+		memset(buffer, 0, sizeof(struct msg_data));
+	
+		// This guarantees all the data is received using socket streams
+		do {
+			char *ptr = &buffer[nbytes];
+			nbytes += recv(server_socket, ptr, sizeof(buffer) - nbytes, 0);
+			if (nbytes == -1)
+				{
+					perror("recv: ");
+					disconnect();
+				}
+		} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
+		
+		if (nbytes == 0)
 			disconnect();
-		}
-	} while (nbytes < sizeof(struct msg_data) && nbytes != 0);
 
-	if (nbytes == 0)
-		disconnect();
+		memcpy(&msg, buffer, sizeof(struct msg_data));
 
-	memcpy(&msg, buffer, sizeof(struct msg_data));
-
-	if (msg.type == BINFO)
-	{
-		// Update game window
-		update_field(game_win, msg.field);
+		update_field(game_win, msg.field, 2);
 		update_stats(stats_win, msg.field);
-		wrefresh(game_win);
-		wrefresh(stats_win);
-		// No need to lock mutex as here there aren't any threads yet
-	}
-	else
-		disconnect();
+		
+	} while (msg.type != BINFO);
 
 	// Create thread to receive field status messages
 	pthread_t recv_thread;
@@ -315,7 +306,7 @@ int main(int argc, char *argv[])
 		do
 		{
 			char *ptr = &buffer[nbytes];
-			nbytes += send(client_socket, ptr, sizeof(buffer) - nbytes, 0);
+			nbytes += send(server_socket, ptr, sizeof(buffer) - nbytes, 0);
 		} while (nbytes < sizeof(struct msg_data));
 	}
 

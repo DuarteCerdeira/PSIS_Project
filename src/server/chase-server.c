@@ -64,9 +64,6 @@ static int n_prizes;
 static pthread_mutex_t mux_n_prizes = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t cond_n_prizes = PTHREAD_COND_INITIALIZER;
 
-// Conditional variable used to broadcast field info
-static pthread_cond_t cond_field_status = PTHREAD_COND_INITIALIZER;
-
 // The two main critical regions are the access to ball positions and health
 static pthread_mutex_t mux_health = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t mux_position = PTHREAD_MUTEX_INITIALIZER;
@@ -89,28 +86,58 @@ void sigint_handler(int signum)
 	exit(0);
 }
 
-void field_status(ball_info_t *field)
+// Thread function to broadcast the field status to all clients
+void *field_update(void *arg)
 {
-	// Fills out player information
-	int f_index = 0;
-	for (int i = 0; i < MAX_BALLS; i++)
-	{
-		if (balls[i].type == EMPTY)
+	ball_info_t *field = (ball_info_t *) arg;
+	
+	struct msg_data msg = {0};
+
+	msg.type = FSTATUS;
+	msg.field[0] = field[0];
+	msg.field[1] = field[1];
+
+	for (int i = 0; i < MAX_BALLS; i++) {
+		// Send to (active) clients only
+		if (balls[i].type != PLAYER)
 			continue;
-		field[f_index].ch = balls[i].info.ch;
-		field[f_index].hp = balls[i].info.hp;
-		field[f_index].pos_x = balls[i].info.pos_x;
-		field[f_index].pos_y = balls[i].info.pos_y;
-		f_index++;
+
+		// Send message to client
+		int nbytes = 0;
+		char buffer[sizeof(struct msg_data)] = {0};
+
+		memcpy(buffer, &msg, sizeof(struct msg_data));
+
+		do {
+			char *ptr = &buffer[nbytes];
+			nbytes += send(balls[i].fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
+		} while (nbytes < sizeof(struct msg_data));
 	}
 
-	pthread_mutex_lock(&mux_stats_win);
-	update_stats(stats_win, field);
-	wrefresh(stats_win);
-	pthread_mutex_unlock(&mux_stats_win);
+	pthread_mutex_lock(&mux_health);
 
-	return;
+	ball_info_t balls_copy[MAX_BALLS] = {0};
+	int f_index = 0;
+	
+	for (int i = 0; i < MAX_BALLS; i++) {
+		if (balls[i].type != PLAYER)
+			continue;
+		memcpy(&balls_copy[f_index++], &balls[i].info, sizeof(ball_info_t));
+	}
+	
+	pthread_mutex_unlock(&mux_health);
+
+	/* Critical region stat window start */
+	pthread_mutex_lock(&mux_stats_win);
+	
+	update_stats(stats_win, balls_copy);
+	
+	pthread_mutex_unlock(&mux_stats_win);
+	/* Critical region stat window end */
+
+	return NULL;
 }
+
 
 ball_info_t create_ball()
 {
@@ -151,6 +178,11 @@ void delete_player(int index)
 
 	// Delete player information
 	close(balls[index].fd);
+
+	ball_info_t field[2] = {0};
+	field[0] = balls[index].info;
+	field[0].ch = ' ';
+	
 	memset(&balls[index], 0, sizeof(struct client_info));
 
 	/* Critical region free spaces start */
@@ -165,7 +197,10 @@ void delete_player(int index)
 	pthread_mutex_unlock(&mux_health);
 	/* Critical region health end */
 
-	pthread_cond_signal(&cond_field_status);
+	pthread_t field_update_thread;
+
+	pthread_create(&field_update_thread, NULL, field_update, field);
+	pthread_join(field_update_thread, NULL);
 }
 
 void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
@@ -177,7 +212,7 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 	switch (dir)
 	{
 	case UP:
-		if (y < 1)
+		if (y <= 1)
 		{
 			return;
 		}
@@ -190,7 +225,7 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		ball_hit_id = board_grid[new_x][new_y];
 		break;
 	case DOWN:
-		if (y > WINDOW_SIZE - 1)
+		if (y >= WINDOW_SIZE - 2)
 		{
 			return;
 		}
@@ -203,7 +238,7 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		ball_hit_id = board_grid[new_x][new_y];
 		break;
 	case LEFT:
-		if (x < 1)
+		if (x <= 1)
 		{
 			return;
 		}
@@ -216,7 +251,7 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		ball_hit_id = board_grid[new_x][new_y];
 		break;
 	case RIGHT:
-		if (x > WINDOW_SIZE - 1)
+		if (x >= WINDOW_SIZE - 2)
 		{
 			return;
 		}
@@ -232,9 +267,17 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		break;
 	}
 
+	ball_info_t field[2] = {0};
+
 	// No ball was hit
 	if (ball_hit_id == -1)
 	{
+
+		// Only one ball has moved, first entry indicates
+		// old position
+		field[0] = *local_ball;
+		field[0].ch = ' ';
+
 		// Ball position is updated
 		board_grid[x][y] = -1;
 		board_grid[new_x][new_y] = ball_id;
@@ -246,6 +289,14 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 
 		local_ball->pos_x = new_x;
 		local_ball->pos_y = new_y;
+
+		// Second entry indicates the player and the new position
+		field[1] = *local_ball;
+
+		pthread_t field_update_thread;
+
+		pthread_create(&field_update_thread, NULL, field_update, field);
+		pthread_join(field_update_thread, NULL);
 		
 		return;
 	}
@@ -268,7 +319,7 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 
 		new_hp += (new_hp + prize_hp > MAX_HP) ? MAX_HP - new_hp : prize_hp;
 	    
-		balls[ball_id].info.hp = ball.info.hp;
+		balls[ball_id].info.hp = new_hp;
 		balls[ball_id].info.pos_x = new_x;
 		balls[ball_id].info.pos_y = new_y;
 
@@ -300,10 +351,19 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		pthread_mutex_unlock(&mux_position);
 		/* Critical region position end */
 
+		field[0] = *local_ball;
+		field[0].ch = ' ';
+
 		local_ball->hp = new_hp;
 		local_ball->pos_x = new_x;
 		local_ball->pos_y = new_y;
-		
+
+		field[1] = *local_ball;
+
+		pthread_t field_update_thread;
+
+		pthread_create(&field_update_thread, NULL, field_update, field);
+		pthread_join(field_update_thread, NULL);
 		
 		return;
 	}
@@ -330,7 +390,18 @@ void handle_move(int ball_id, direction_t dir, ball_info_t *local_ball)
 		/* Critical region health end */
 
 		local_ball->hp = ball_hp;
-		
+
+		ball.info.hp = ball_hp;
+		ball_hit.info.hp = ball_hit_hp;
+
+		field[0] = ball.info;
+		field[1] = ball_hit.info;
+
+		pthread_t field_update_thread;
+
+		pthread_create(&field_update_thread, NULL, field_update, field);
+		pthread_join(field_update_thread, NULL);
+			
 		return;
 	}
 
@@ -404,7 +475,6 @@ void *handle_bots(void *arg)
 			direction_t dir = random() % 4 + 1;
 			handle_move(bot_index[i], dir, &(bots[i].info));
 		}
-		pthread_cond_signal(&cond_field_status);
 	}
 }
 
@@ -494,8 +564,16 @@ void *handle_prizes(void *arg)
 		
 		pthread_mutex_unlock(&mux_position);
 		/* Critical region position end */
+		
+		if (first_prizes == 5) {
+			ball_info_t field[2] = {0};
+			field[0] = new_prize.info;
+			
+			pthread_t field_update_thread;
 
-		pthread_cond_signal(&cond_field_status);
+			pthread_create(&field_update_thread, NULL, field_update, field);
+			pthread_join(field_update_thread, NULL);
+		}
 	}
 }
 
@@ -596,6 +674,41 @@ void *client_thread(void *arg)
 			/* Critical region health start */
 			pthread_mutex_lock(&mux_health);
 
+			// Send entire board to the new client
+			memset(&msg, 0, sizeof(struct msg_data));
+
+			// No new balls can join while we are sending
+			// the board data
+			
+			/* Critical region free_spaces start */
+			pthread_mutex_lock(&mux_free_spaces);
+			
+			msg.type = FSTATUS;
+			int j = 0;
+			for (int i = 0; i < MAX_BALLS; i++) {
+				if (balls[i].type == EMPTY) {
+					continue;
+				}
+				msg.field[j++] = balls[i].info;
+				if (j == 2) {
+					nbytes = 0;
+					memset(buffer, 0, sizeof(struct msg_data));
+
+					memcpy(buffer, &msg, sizeof(struct msg_data));
+
+					// This guarantees that all the data is sent
+					do
+						{
+							char *ptr = &buffer[nbytes];
+							nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
+						} while (nbytes < sizeof(struct msg_data));
+					j = 0;
+				}
+			}
+
+			pthread_mutex_unlock(&mux_free_spaces);
+			/* Critical region free_spaces end */
+			
 			// Update balls structure with new player
 			balls[index] = client;
 
@@ -628,6 +741,17 @@ void *client_thread(void *arg)
 				char *ptr = &buffer[nbytes];
 				nbytes += send(client.fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
 			} while (nbytes < sizeof(struct msg_data));
+
+			// Send FSTATUS message to all the other players
+			ball_info_t field[2] = {0};
+
+			field[0] = client.info;
+
+			pthread_t field_update_thread;
+
+			pthread_create(&field_update_thread, NULL, field_update, field);
+			pthread_join(field_update_thread, NULL);
+			
 			break;
 
 		case (BMOV):
@@ -680,56 +804,11 @@ void *client_thread(void *arg)
 		default:
 			continue;
 		}
-
-		pthread_cond_signal(&cond_field_status);
 	}
 
 	delete_player(index);
 
 	return NULL;
-}
-
-// Thread function to broadcast the field status to all clients
-void *field_update(void *arg)
-{
-	while(1) {
-		/* Critical region position start */
-		pthread_mutex_lock(&mux_position);
-		pthread_cond_wait(&cond_field_status, &mux_position);
-		
-		/* Critical region health start */
-		pthread_mutex_lock(&mux_health);
-
-		struct msg_data msg = {0};
-
-		msg.type = FSTATUS;
-		field_status(msg.field);
-
-		for (int i = 0; i < MAX_BALLS; i++)
-		{
-			// Send to (active) clients only
-			if (balls[i].type != PLAYER)
-				continue;
-
-			// Send message to client
-			int nbytes = 0;
-			char buffer[sizeof(struct msg_data)] = {0};
-
-			memcpy(buffer, &msg, sizeof(struct msg_data));
-
-			do
-			{
-				char *ptr = &buffer[nbytes];
-				nbytes += send(balls[i].fd, ptr, sizeof(buffer) - nbytes, MSG_NOSIGNAL);
-			} while (nbytes < sizeof(struct msg_data));
-		}
-		
-		pthread_mutex_unlock(&mux_health);
-		/* Critical region health end */
-
-		pthread_mutex_unlock(&mux_position);
-		/* Critical region position end */
-	}
 }
 
 int main(int argc, char *argv[])
@@ -831,10 +910,6 @@ int main(int argc, char *argv[])
 	// Create thread to handle prizes
 	pthread_t prizes_thread;
 	pthread_create(&prizes_thread, NULL, handle_prizes, NULL);
-
-	// Create thread to broadcast field info
-	pthread_t field_update_thread;
-	pthread_create(&field_update_thread, NULL, field_update, NULL);
 
 	pthread_t client_threads[MAX_BALLS];
 	int n_clients = 0;
